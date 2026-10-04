@@ -289,7 +289,9 @@ enum class FileDialogOutcome : std::uint8_t {
 struct FileDialogResult final {
   FileDialogTicket ticket = kNoFileDialog;
   FileDialogOutcome outcome = FileDialogOutcome::Cancelled;
-  /// The chosen path when outcome is Chosen, otherwise empty.
+  /// The chosen path when outcome is Chosen, otherwise empty. Separators
+  /// are '/' on every platform and a trailing one is dropped, as in
+  /// platform_get_app_dir.
   char path[kMaxFileDialogPathLength] = {};
 };
 

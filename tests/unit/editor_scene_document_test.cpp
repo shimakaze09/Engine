@@ -515,6 +515,14 @@ int check_save_failures_log_an_error() {
   return finish(0);
 }
 
+/// True when `entry` is the Recent Scenes entry for the scene at `path`:
+/// the list stores each scene in one normalized form (#1216).
+bool is_entry_for(const char *entry, const char *path) noexcept {
+  char expected[kMaxRecentPathLength] = {};
+  return recent_scene_entry(path, expected, sizeof(expected)) &&
+         (std::strcmp(entry, expected) == 0);
+}
+
 /// EXPECTATION: recent scenes are MRU-ordered, de-duplicated on re-add,
 /// survive a simulated restart (reload from the persisted file), and
 /// silently drop an entry pointing at a deleted file.
@@ -564,9 +572,9 @@ int check_recent_scenes_persist_and_prune() {
   recent_scenes_add(pathA);
 
   bool ok = (recent_scene_count() == 3U) &&
-            (std::strcmp(recent_scene_at(0U), pathA) == 0) &&
-            (std::strcmp(recent_scene_at(1U), pathC) == 0) &&
-            (std::strcmp(recent_scene_at(2U), pathB) == 0);
+            is_entry_for(recent_scene_at(0U), pathA) &&
+            is_entry_for(recent_scene_at(1U), pathC) &&
+            is_entry_for(recent_scene_at(2U), pathB);
 
   // Simulate a restart: drop the in-memory cache and delete one file
   // before the next load.
@@ -576,10 +584,10 @@ int check_recent_scenes_persist_and_prune() {
   bool foundA = false;
   bool foundB = false;
   for (std::size_t i = 0U; i < recent_scene_count(); ++i) {
-    if (std::strcmp(recent_scene_at(i), pathA) == 0) {
+    if (is_entry_for(recent_scene_at(i), pathA)) {
       foundA = true;
     }
-    if (std::strcmp(recent_scene_at(i), pathB) == 0) {
+    if (is_entry_for(recent_scene_at(i), pathB)) {
       foundB = true;
     }
   }
@@ -687,7 +695,7 @@ int check_recent_scenes_unreadable_file_never_overwritten() {
   bool ok = (recent_scene_count() == 0U);
   recent_scenes_add(scenePath);
   ok = ok && (recent_scene_count() == 1U) &&
-       (std::strcmp(recent_scene_at(0U), scenePath) == 0);
+       is_entry_for(recent_scene_at(0U), scenePath);
   // The stored bytes are untouched by the add's persistence attempt.
   ok = ok && (read_file_bytes(recentFile) == oversized);
   if (!ok) {
@@ -725,7 +733,7 @@ int check_recent_scenes_unreadable_file_never_overwritten() {
   ok = ok && !read_file_bytes(recentFile).empty();
   recent_scenes_set_directory_override_for_tests(recentDir);
   ok = ok && (recent_scene_count() == 1U) &&
-       (std::strcmp(recent_scene_at(0U), scenePath) == 0);
+       is_entry_for(recent_scene_at(0U), scenePath);
   if (!ok) {
     g_recentGuard.rearm();
     return 9;
@@ -741,8 +749,8 @@ int check_recent_scenes_unreadable_file_never_overwritten() {
   ok = ok && (recent_scene_count() == 2U);
   recent_scenes_set_directory_override_for_tests(recentDir);
   ok = ok && (recent_scene_count() == 2U) &&
-       (std::strcmp(recent_scene_at(0U), secondScene) == 0) &&
-       (std::strcmp(recent_scene_at(1U), scenePath) == 0);
+       is_entry_for(recent_scene_at(0U), secondScene) &&
+       is_entry_for(recent_scene_at(1U), scenePath);
 
   g_recentGuard.rearm();
   return ok ? 0 : 10;

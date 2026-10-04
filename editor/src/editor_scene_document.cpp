@@ -12,10 +12,12 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <string>
 #include <system_error>
 
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/project_data.h"
 #include "engine/core/vfs.h"
 #include "engine/engine.h"
 #include "engine/project.h"
@@ -212,7 +214,7 @@ bool perform_scene_open(const char *path) noexcept {
   if (!runtime::load_scene(*session.world, path)) {
     // load_scene is transactional: the live world, document identity, and
     // undo history are all still exactly as they were before this call.
-    recent_list_remove(&editor_session().document.recentScenes, path);
+    recent_scenes_remove(path);
     return false;
   }
 
@@ -668,12 +670,116 @@ void scene_document_poll_dialog_result() noexcept {
   }
 }
 
+namespace {
+
+/// `path` absolute and normal, resolved through the file system as far as
+/// it exists, so two spellings of one file meet: separators, `.` and `..`,
+/// and on Windows the case of the drive and directories.
+std::filesystem::path identity_path(const char *path,
+                                    std::error_code &ec) noexcept {
+  std::filesystem::path resolved =
+      std::filesystem::weakly_canonical(std::filesystem::path(path), ec);
+  if (ec) {
+    ec.clear();
+    resolved = std::filesystem::absolute(std::filesystem::path(path), ec);
+  }
+  return resolved.lexically_normal();
+}
+
+} // namespace
+
+bool recent_scene_entry(const char *path, char *out,
+                        std::size_t capacity) noexcept {
+  if ((path == nullptr) || (path[0] == '\0') || (out == nullptr) ||
+      (capacity == 0U)) {
+    return false;
+  }
+  namespace fs = std::filesystem;
+  std::error_code ec{};
+  const fs::path scene = identity_path(path, ec);
+  if (ec) {
+    return false;
+  }
+  std::string entry;
+  const char *root = active_config().editorAssetRoot;
+  if ((root != nullptr) && (root[0] != '\0')) {
+    const fs::path absoluteRoot = identity_path(root, ec);
+    const fs::path relative =
+        ec ? fs::path() : scene.lexically_relative(absoluteRoot);
+    // Inside the root only: a path that climbs out names a scene that
+    // belongs to no project, and keeps its absolute form.
+    if (!relative.empty() && (relative.begin()->string() != "..") &&
+        (relative.string() != ".")) {
+      entry = relative.generic_string();
+    }
+  }
+  if (entry.empty()) {
+    entry = scene.generic_string();
+  }
+  if (entry.size() >= capacity) {
+    return false;
+  }
+  std::memcpy(out, entry.c_str(), entry.size() + 1U);
+  return true;
+}
+
+bool recent_scene_os_path(const char *entry, char *out,
+                          std::size_t capacity) noexcept {
+  if ((entry == nullptr) || (entry[0] == '\0') || (out == nullptr) ||
+      (capacity == 0U)) {
+    return false;
+  }
+  namespace fs = std::filesystem;
+  const fs::path stored(entry);
+  const char *root = active_config().editorAssetRoot;
+  const bool relative = !stored.has_root_name() && !stored.has_root_directory();
+  std::error_code ec{};
+  const std::string path =
+      (relative && (root != nullptr) && (root[0] != '\0'))
+          ? (fs::absolute(fs::path(root), ec) / stored)
+                .lexically_normal()
+                .generic_string()
+          : stored.generic_string();
+  if (ec) {
+    return false;
+  }
+  if (path.size() >= capacity) {
+    return false;
+  }
+  std::memcpy(out, path.c_str(), path.size() + 1U);
+  return true;
+}
+
+bool recent_scene_entry_is_file(const char *entry) noexcept {
+  char path[kMaxDocumentPathLength] = {};
+  return recent_scene_os_path(entry, path, sizeof(path)) &&
+         recent_entry_is_file(path);
+}
+
+bool recent_scenes_directory(char *out, std::size_t capacity) noexcept {
+  return core::project_data_named() && core::project_data_dir(out, capacity);
+}
+
 void recent_scenes_load_once() noexcept {
   recent_list_load_once(&editor_session().document.recentScenes);
 }
 
 void recent_scenes_add(const char *path) noexcept {
-  recent_list_add(&editor_session().document.recentScenes, path);
+  char entry[kMaxRecentPathLength] = {};
+  if (recent_scene_entry(path, entry, sizeof(entry))) {
+    recent_list_add(&editor_session().document.recentScenes, entry);
+  }
+}
+
+void recent_scenes_remove(const char *path) noexcept {
+  char entry[kMaxRecentPathLength] = {};
+  if (recent_scene_entry(path, entry, sizeof(entry))) {
+    recent_list_remove(&editor_session().document.recentScenes, entry);
+  }
+}
+
+void recent_scenes_forget() noexcept {
+  recent_list_forget(&editor_session().document.recentScenes);
 }
 
 std::size_t recent_scene_count() noexcept {

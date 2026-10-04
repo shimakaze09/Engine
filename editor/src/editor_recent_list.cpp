@@ -1,4 +1,4 @@
-// Implements the editor's recently-used lists: read once from the save
+// Implements the editor's recently-used lists: read once from the list's
 // directory, most recent first, pruned of entries that no longer exist,
 // and written back atomically after every change unless the stored file
 // could not be read.
@@ -30,12 +30,16 @@ std::size_t capacity_of(const RecentList &list) noexcept {
                                              : kMaxRecentEntries;
 }
 
-/// The directory the lists live in: the test override when set, otherwise
-/// the per-user platform save directory.
-bool resolve_directory(char *out, std::size_t capacity) noexcept {
+/// The directory `list` lives in: the test override when set, otherwise
+/// the list's own directory, by default the per-user save directory.
+bool resolve_directory(const RecentList &list, char *out,
+                       std::size_t capacity) noexcept {
   if (g_directoryOverride[0] != '\0') {
     const int written = std::snprintf(out, capacity, "%s", g_directoryOverride);
     return (written > 0) && (static_cast<std::size_t>(written) < capacity);
+  }
+  if (list.directory != nullptr) {
+    return list.directory(out, capacity);
   }
   return core::platform_get_save_dir(out, capacity);
 }
@@ -43,7 +47,7 @@ bool resolve_directory(char *out, std::size_t capacity) noexcept {
 bool build_path(const RecentList &list, char *out,
                 std::size_t capacity) noexcept {
   char directory[900] = {};
-  if (!resolve_directory(directory, sizeof(directory))) {
+  if (!resolve_directory(list, directory, sizeof(directory))) {
     return false;
   }
   const int written =
@@ -72,7 +76,7 @@ void persist(const RecentList &list) noexcept {
     return;
   }
   char directory[900] = {};
-  if (!resolve_directory(directory, sizeof(directory)) ||
+  if (!resolve_directory(list, directory, sizeof(directory)) ||
       !core::create_directories_durably(directory)) {
     return;
   }

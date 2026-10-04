@@ -96,6 +96,27 @@ void check_dialog_handoff() {
             (std::strcmp(result.path, "/tmp/projects") == 0),
         "a folder dialog with no filters answers with the folder chosen");
 
+  // A Windows answer arrives in the engine's one spelling, so it names the
+  // same file as a path the engine built itself (#1217).
+  const FileDialogTicket native = request_scripted();
+  CHECK((native != kNoFileDialog) &&
+            platform_answer_scripted_file_dialog(
+                native, "C:\\dev\\game\\assets\\scenes\\main.scene") &&
+            (platform_take_file_dialog_result(native, &result) ==
+             FileDialogPoll::Ready) &&
+            (std::strcmp(result.path, "C:/dev/game/assets/scenes/main.scene") ==
+             0),
+        "a backslash answer is delivered with '/' separators");
+  const FileDialogTicket nativeFolder =
+      platform_request_file_dialog(FileDialogKind::Folder, nullptr, 0, nullptr);
+  CHECK((nativeFolder != kNoFileDialog) &&
+            platform_answer_scripted_file_dialog(nativeFolder,
+                                                 "D:\\dev\\projects\\") &&
+            (platform_take_file_dialog_result(nativeFolder, &result) ==
+             FileDialogPoll::Ready) &&
+            (std::strcmp(result.path, "D:/dev/projects") == 0),
+        "a folder answer loses its trailing separator");
+
   // A path that does not fit is refused, not cut.
   static char longPath[kMaxFileDialogPathLength + 1U] = {};
   std::memset(longPath, 'a', kMaxFileDialogPathLength);

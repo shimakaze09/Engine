@@ -35,6 +35,12 @@ enum class PendingSceneAction : std::uint8_t {
 /// Enumerates the outstanding native file dialog kind, if any.
 enum class SceneDialogKind : std::uint8_t { None, Open, SaveAs };
 
+/// Recent Scenes' list hooks: an entry is still worth offering while it
+/// names a file once resolved (recent_scene_os_path), and the list lives in
+/// the open project's per-user data directory (none with no project open).
+bool recent_scene_entry_is_file(const char *entry) noexcept;
+bool recent_scenes_directory(char *out, std::size_t capacity) noexcept;
+
 /// Owns scene-document identity, dirty bookkeeping, the unsaved-change
 /// confirm prompt, the recent-scenes list, and which native file dialog
 /// the session waits on. Embedded in EditorSession. The platform holds a
@@ -64,9 +70,12 @@ struct SceneDocumentState final {
   // As with no follow-up action.
   bool dialogContinuesPendingAction = false;
 
-  // The scenes opened or saved last, kept per user across projects.
+  // The scenes opened or saved last in this project, per user, as Godot,
+  // Unity and Unreal keep them. Each is stored as its recent_scene_entry,
+  // so one file has one entry however its path was spelled.
   RecentList recentScenes{"editor_recent_scenes.json", "scenes",
-                          kMaxRecentScenes, &recent_entry_is_file};
+                          kMaxRecentScenes, &recent_scene_entry_is_file,
+                          &recent_scenes_directory};
 
   char lastSaveError[kMaxDocumentPathLength + 64U] = {};
 
@@ -202,12 +211,28 @@ scene_dialog_arm_for_tests(SceneDialogKind kind,
 void scene_dialog_deliver_for_tests(core::FileDialogTicket ticket,
                                     const char *path) noexcept;
 
-/// Recent-scenes list: MRU-ordered, persisted to the platform save
-/// directory, pruned of unreadable entries on load and on failed opens.
+/// Recent Scenes: the open project's scenes, most recent first, persisted
+/// to its per-user data directory and pruned of entries that no longer
+/// name a file, on load and on failed opens.
 void recent_scenes_load_once() noexcept;
+/// Moves the scene at OS path `path` to the front, under its entry.
 void recent_scenes_add(const char *path) noexcept;
+/// Drops the scene at OS path `path`, matched by its entry.
+void recent_scenes_remove(const char *path) noexcept;
 std::size_t recent_scene_count() noexcept;
+/// The entry at `index`, which is also its menu label; "" past the end.
 const char *recent_scene_at(std::size_t index) noexcept;
+/// The entry for the scene at OS path `path`: its path below the open
+/// project's content root (EngineConfig::editorAssetRoot) in generic form,
+/// "scenes/main.scene", when it is inside it, otherwise its normalized
+/// absolute path in generic form. False when it does not fit `capacity`.
+bool recent_scene_entry(const char *path, char *out,
+                        std::size_t capacity) noexcept;
+/// The OS path `entry` names. False when it does not fit `capacity`.
+bool recent_scene_os_path(const char *entry, char *out,
+                          std::size_t capacity) noexcept;
+/// Forgets the cached list, so the next access reads the open project's.
+void recent_scenes_forget() noexcept;
 
 /// Arms the project's startup scene (EngineConfig::editorScenePath) to
 /// open on the next scene_document_open_startup_scene; nothing with no
@@ -232,7 +257,8 @@ void scene_document_update_window_title() noexcept;
 void scene_document_reset_for_world_switch() noexcept;
 
 /// Test-only override for the recent-scenes persistence directory; an
-/// empty string restores the default per-user platform save directory.
+/// empty string restores the default, the open project's per-user data
+/// directory.
 /// Exists so tests never read or write the real user's save directory.
 void recent_scenes_set_directory_override_for_tests(
     const char *directory) noexcept;
