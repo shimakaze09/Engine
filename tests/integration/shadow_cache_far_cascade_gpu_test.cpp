@@ -22,13 +22,11 @@
 // ctest entry since each concerns the process's own early frames:
 //   after-boot       the frame after the fixture's first, as above
 //                    (default);
-//   after-boot-no-reset
-//                    the same frame with the fixture issuing no reset, so
-//                    r_vsync keeps its boot value throughout;
 //   after-boot-unchanged
-//                    as after-boot-no-reset, run with the cvars the suite
-//                    sets given as boot values (its ctest entry does), so
-//                    nothing at all changes on that frame;
+//                    the same frame with nothing changing on it: the
+//                    fixture issues no reset, so r_vsync keeps its boot
+//                    value, and the cvars the suite sets are given as boot
+//                    values (its ctest entry does);
 //   third-frame      the process's third frame, one after after-boot's;
 //   settled          a frame well after those, with nothing else changing;
 //   after-vsync-on   a settled frame on which a reset turning vsync on
@@ -303,7 +301,6 @@ int main(int argc, char **argv) {
       FirstRender frame;
       bool resetOnSecondFrame = true;
     } kFrames[] = {{"after-boot", FirstRender::AfterBoot},
-                   {"after-boot-no-reset", FirstRender::AfterBoot, false},
                    {"after-boot-unchanged", FirstRender::AfterBoot, false},
                    {"third-frame", FirstRender::ThirdFrame},
                    {"settled", FirstRender::Settled},

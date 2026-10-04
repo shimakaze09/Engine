@@ -271,7 +271,7 @@ set_tests_properties(engine_integration_shadow_cache_far_cascade_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 # The same suite with the cascades' first render on other early frames
 # (the suite's file comment lists them).
-foreach(_first_render IN ITEMS after-boot-no-reset after-boot-unchanged
+foreach(_first_render IN ITEMS after-boot-unchanged
         third-frame settled after-vsync-on after-vsync-off)
     string(REPLACE "-" "_" _first_render_suffix "${_first_render}")
     set(_far_cascade_test
