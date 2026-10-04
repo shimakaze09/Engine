@@ -4,6 +4,8 @@
 
 #include "engine/math/transform.h"
 
+#include <cstdio>
+
 namespace engine::renderer {
 
 RendererContext &renderer_context() noexcept {
@@ -32,12 +34,14 @@ void reset_renderer_public_state() noexcept {
   renderer_context().skinPaletteCount = 0U;
 }
 
-void reset_backend_on_failure() noexcept {
+void reset_backend_on_failure(const char *reason) noexcept {
   BackendState &backend = backend_state();
   backend = BackendState{};
   backend.failed = true;
+  static_cast<void>(std::snprintf(
+      backend.failureReason.data(), backend.failureReason.size(), "%s",
+      (reason != nullptr) ? reason : "the renderer did not initialize"));
 }
-
 
 /// The one projection builder shared by every active-camera consumer:
 /// perspective from fovRadians, orthographic from the half-height

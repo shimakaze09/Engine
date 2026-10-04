@@ -451,6 +451,13 @@ void initialize_renderer() noexcept;
 /// initialize_renderer, rather than rebuilding the backend against the
 /// device and shader system this call destroyed.
 void shutdown_renderer() noexcept;
+/// Why the renderer cannot draw scenes in this lifetime, or null while it
+/// can or has not tried yet. The backend latches the first failure to
+/// build itself, a shader program that did not load for instance, and
+/// every later flush draws nothing; a view showing a scene target shows
+/// this instead of the black that target holds. Cleared by
+/// shutdown_renderer.
+const char *scene_rendering_failure() noexcept;
 
 /// The render device for work inside the renderer's lifetime that needs
 /// one: created on demand while the renderer is open (the null device on

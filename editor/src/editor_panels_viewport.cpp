@@ -637,9 +637,46 @@ math::Vec3 viewport_drop_world_position(const ImVec2 &imagePos,
 
 } // namespace
 
-/// Draws a render view's last image filling the panel's content region.
+/// Draws, centred in a dark region, why the renderer draws no scene, in
+/// place of the black its target would hold.
+void draw_scene_rendering_failure(const char *reason,
+                                  const ImVec2 &regionSize) noexcept {
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+  ImDrawList *drawList = ImGui::GetWindowDrawList();
+  drawList->AddRectFilled(
+      origin, ImVec2(origin.x + regionSize.x, origin.y + regionSize.y),
+      IM_COL32(24, 24, 28, 255));
+  const float margin = ImGui::GetFontSize() * 2.0F;
+  const float wrap = std::max(regionSize.x - (2.0F * margin), 1.0F);
+  constexpr const char *kTitle = "The renderer cannot draw this view";
+  const ImVec2 titleSize = ImGui::CalcTextSize(kTitle);
+  const ImVec2 bodySize = ImGui::CalcTextSize(reason, nullptr, false, wrap);
+  const float spacing = ImGui::GetStyle().ItemSpacing.y;
+  const float top =
+      origin.y +
+      std::max((regionSize.y - titleSize.y - spacing - bodySize.y) * 0.5F,
+               margin * 0.5F);
+  drawList->AddText(
+      ImVec2(origin.x + std::max((regionSize.x - titleSize.x) * 0.5F, margin),
+             top),
+      IM_COL32(255, 150, 120, 255), kTitle);
+  drawList->AddText(
+      ImGui::GetFont(), ImGui::GetFontSize(),
+      ImVec2(origin.x + std::max((regionSize.x - bodySize.x) * 0.5F, margin),
+             top + titleSize.y + spacing),
+      IM_COL32(220, 220, 220, 255), reason, nullptr, wrap);
+  ImGui::Dummy(regionSize);
+}
+
+/// Draws a render view's last image filling the panel's content region,
+/// or, when the renderer cannot draw scenes, why.
 void draw_view_image(renderer::RenderViewId view,
                      const ImVec2 &regionSize) noexcept {
+  const char *failure = renderer::scene_rendering_failure();
+  if ((failure != nullptr) && (regionSize.x > 0.0F) && (regionSize.y > 0.0F)) {
+    draw_scene_rendering_failure(failure, regionSize);
+    return;
+  }
   const std::uint64_t texId =
       imgui_texture_id(renderer::get_render_view_texture(view));
   if ((texId != 0U) && (regionSize.x > 0.0F) && (regionSize.y > 0.0F)) {
