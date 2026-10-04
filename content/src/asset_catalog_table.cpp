@@ -33,6 +33,12 @@ struct AssetCatalog::Page final {
 };
 
 AssetCatalog::~AssetCatalog() noexcept {
+  if (references != nullptr) {
+    core::mem_tracker_free(core::MemTag::Assets,
+                           referenceCapacity * sizeof(AssetReferenceEdge));
+  }
+  delete[] references;
+  references = nullptr;
   for (Page *&page : pages) {
     if (page != nullptr) {
       core::mem_tracker_free(core::MemTag::Assets, sizeof(Page));
@@ -164,6 +170,7 @@ void clear_asset_catalog(AssetCatalog *catalog) noexcept {
     reload_generation_at(*catalog, i) = 0U;
   }
   catalog->recordCount = 0U;
+  catalog->referenceCount = 0U;
   if (catalog->index != nullptr) {
     std::memset(catalog->index, 0,
                 catalog->indexCapacity * sizeof(catalog->index[0]));
@@ -676,16 +683,40 @@ bool load_with_deps_recursive(DependencyTraversal &traversal, AssetId id,
   return true;
 }
 
-/// Whether record `record` lists `id` among its dependencies.
-bool record_depends_on(const AssetCatalog &catalog, std::size_t record,
-                       AssetId id) noexcept {
-  const AssetMetadata &meta = record_at(catalog, record);
+/// Whether `meta`'s dependency list records `id`.
+bool lists_dependency(const AssetMetadata &meta, AssetId id) noexcept {
   for (std::size_t i = 0U; i < meta.dependencyCount; ++i) {
     if (meta.dependencies[i] == id) {
       return true;
     }
   }
   return false;
+}
+
+/// Calls `take(record)` once per record that depends on `id`: first each
+/// whose dependency list records it, in record order, then each document
+/// that references it (asset_references.h) and does not also list it. One
+/// pass over the records and one over the reference table, so a walk that
+/// asks this per changed asset stays linear in the catalog.
+template <typename Take>
+void for_each_dependent(const AssetCatalog &catalog, AssetId id,
+                        Take take) noexcept {
+  for (std::size_t i = 0U; i < catalog.recordCount; ++i) {
+    if (lists_dependency(record_at(catalog, i), id)) {
+      take(i);
+    }
+  }
+  for (std::size_t i = 0U; i < catalog.referenceCount; ++i) {
+    if (catalog.references[i].target != id) {
+      continue;
+    }
+    const std::size_t record =
+        find_record(&catalog, catalog.references[i].document);
+    if ((record != kNoRecord) &&
+        !lists_dependency(record_at(catalog, record), id)) {
+      take(record);
+    }
+  }
 }
 
 } // namespace
@@ -696,16 +727,15 @@ std::size_t find_asset_dependents(const AssetCatalog *catalog, AssetId id,
   if ((catalog == nullptr) || (id == kInvalidAssetId)) {
     return 0U;
   }
+  // A document's edges to one target are kept unique, so each dependent is
+  // taken once.
   std::size_t count = 0U;
-  for (std::size_t i = 0U; i < catalog->recordCount; ++i) {
-    if (!record_depends_on(*catalog, i, id)) {
-      continue;
-    }
+  for_each_dependent(*catalog, id, [&](std::size_t record) noexcept {
     if ((outIds != nullptr) && (count < maxIds)) {
-      outIds[count] = record_at(*catalog, i).assetId;
+      outIds[count] = record_at(*catalog, record).assetId;
     }
     ++count;
-  }
+  });
   return count;
 }
 
@@ -740,16 +770,15 @@ std::size_t notify_asset_changed(const AssetCatalog *catalog, AssetId changed,
 
   AssetId cause = changed;
   for (;;) {
-    for (std::size_t i = 0U; i < records; ++i) {
-      const AssetId dependent = record_at(*catalog, i).assetId;
-      if (asset_visited(visited, i, dependent) ||
-          !record_depends_on(*catalog, i, cause)) {
-        continue;
+    for_each_dependent(*catalog, cause, [&](std::size_t record) noexcept {
+      const AssetId dependent = record_at(*catalog, record).assetId;
+      if (asset_visited(visited, record, dependent)) {
+        return;
       }
-      static_cast<void>(mark_asset_visited(visited, i, dependent));
-      queue[tail++] = static_cast<std::uint32_t>(i);
+      static_cast<void>(mark_asset_visited(visited, record, dependent));
+      queue[tail++] = static_cast<std::uint32_t>(record);
       visit(dependent, cause, userData);
-    }
+    });
     if (head == tail) {
       break;
     }
