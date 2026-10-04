@@ -17,12 +17,17 @@
 // Every failure seen came from the cascades' first render of the scene,
 // and that render fell on the frame after the fixture's first: the
 // process's second frame, and the one on which the device's swapchain
-// reset (r_vsync leaving its boot value) takes effect. The argument
-// chooses the frame the first render lands on, each its own ctest entry
-// since each concerns the process's own early frames:
-//   after-boot   the frame after the fixture's first, as above (default);
-//   settled      a frame well after both, with nothing else changing;
-//   after-reset  a settled frame on which a swapchain reset takes effect.
+// reset (r_vsync leaving its boot value of 1 for 0) takes effect. The
+// argument chooses the frame the first render lands on, each its own
+// ctest entry since each concerns the process's own early frames:
+//   after-boot       the frame after the fixture's first, as above
+//                    (default);
+//   second-frame     the frame after that, one frame later;
+//   settled          a frame well after both, with nothing else changing;
+//   after-vsync-on   a settled frame on which a reset turning vsync on
+//                    takes effect;
+//   after-vsync-off  a settled frame on which a reset turning vsync off
+//                    takes effect, as the fixture's does.
 #include "../gpu_scene_fixture.h"
 
 #include <cmath>
@@ -40,7 +45,13 @@ constexpr int kCycles = 6;
 
 /// Where the cascades' first render of the scene lands; see the file
 /// comment.
-enum class FirstRender { AfterBoot, Settled, AfterReset };
+enum class FirstRender {
+  AfterBoot,
+  SecondFrame,
+  Settled,
+  AfterVsyncOn,
+  AfterVsyncOff
+};
 
 FirstRender g_firstRender = FirstRender::AfterBoot;
 
@@ -129,19 +140,28 @@ bool read_faces(engine::EnginePipeline &pipeline, const char *what,
 bool reach_first_render_frame(engine::EnginePipeline &pipeline) noexcept {
   using engine::tests::checked;
   using engine::tests::settle_frames;
+  // The device resets its swapchain at the end of the frame on which
+  // r_vsync changed, so the frame after it is the first to run on the
+  // reset swapchain.
   switch (g_firstRender) {
   case FirstRender::AfterBoot:
     return true;
+  case FirstRender::SecondFrame:
+    return settle_frames(pipeline, 1);
   case FirstRender::Settled:
     return settle_frames(pipeline, 8);
-  case FirstRender::AfterReset:
-    // The device resets its swapchain at the end of the frame on which
-    // r_vsync changed, so the frame after it is the first to run on the
-    // reset swapchain.
+  case FirstRender::AfterVsyncOn:
     if (!settle_frames(pipeline, 8)) {
       return false;
     }
     checked(engine::core::cvar_set_int("r_vsync", 1), "r_vsync");
+    return settle_frames(pipeline, 1);
+  case FirstRender::AfterVsyncOff:
+    checked(engine::core::cvar_set_int("r_vsync", 1), "r_vsync");
+    if (!settle_frames(pipeline, 8)) {
+      return false;
+    }
+    checked(engine::core::cvar_set_int("r_vsync", 0), "r_vsync");
     return settle_frames(pipeline, 1);
   }
   return false;
@@ -268,12 +288,23 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
 /// Runs the suite with its first render where argv[1] puts it.
 int main(int argc, char **argv) {
   if (argc > 1) {
-    g_firstRenderName = argv[1];
-    if (std::strcmp(argv[1], "settled") == 0) {
-      g_firstRender = FirstRender::Settled;
-    } else if (std::strcmp(argv[1], "after-reset") == 0) {
-      g_firstRender = FirstRender::AfterReset;
-    } else if (std::strcmp(argv[1], "after-boot") != 0) {
+    static constexpr struct {
+      const char *name;
+      FirstRender frame;
+    } kFrames[] = {{"after-boot", FirstRender::AfterBoot},
+                   {"second-frame", FirstRender::SecondFrame},
+                   {"settled", FirstRender::Settled},
+                   {"after-vsync-on", FirstRender::AfterVsyncOn},
+                   {"after-vsync-off", FirstRender::AfterVsyncOff}};
+    bool known = false;
+    for (const auto &frame : kFrames) {
+      if (std::strcmp(argv[1], frame.name) == 0) {
+        g_firstRender = frame.frame;
+        g_firstRenderName = frame.name;
+        known = true;
+      }
+    }
+    if (!known) {
       std::fprintf(stderr, "FAIL: unknown first-render frame '%s'\n", argv[1]);
       return 8;
     }

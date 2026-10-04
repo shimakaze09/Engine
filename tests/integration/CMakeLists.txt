@@ -269,10 +269,10 @@ engine_add_test_executable(engine_integration_shadow_cache_far_cascade_gpu
 )
 set_tests_properties(engine_integration_shadow_cache_far_cascade_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
-# The same suite with the cascades' first render on other early frames:
-# one with nothing else changing, and one on which a swapchain reset takes
-# effect (the suite's file comment lists them).
-foreach(_first_render IN ITEMS settled after-reset)
+# The same suite with the cascades' first render on other early frames
+# (the suite's file comment lists them).
+foreach(_first_render IN ITEMS
+        second-frame settled after-vsync-on after-vsync-off)
     string(REPLACE "-" "_" _first_render_suffix "${_first_render}")
     set(_far_cascade_test
         engine_integration_shadow_cache_far_cascade_gpu_${_first_render_suffix})
