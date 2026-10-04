@@ -166,7 +166,7 @@ bool add_box(engine::runtime::World &world, engine::runtime::Entity entity,
 bool add_script(engine::runtime::World &world, engine::runtime::Entity entity,
                 const char *path) noexcept {
   engine::runtime::ScriptComponent script{};
-  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s", path);
+  std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s", path);
   return world.add_script_component(entity, script);
 }
 

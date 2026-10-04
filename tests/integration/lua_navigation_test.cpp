@@ -162,7 +162,7 @@ bool write_fixtures() noexcept {
                 kNavMeshVirtualPath);
   const engine::runtime::Entity scripted = author->create_scene_object();
   engine::runtime::ScriptComponent script{};
-  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+  std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s",
                 kScriptPath);
   if (!add_box(*author, Vec3(0.0F, -0.5F, 0.0F), Vec3(10.0F, 0.5F, 10.0F)) ||
       !add_box(*author, Vec3(0.0F, 1.0F, -3.0F), Vec3(0.5F, 1.0F, 7.0F)) ||

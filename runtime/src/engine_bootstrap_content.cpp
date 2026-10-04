@@ -241,7 +241,8 @@ void create_bootstrap_scene(runtime::World *world) noexcept {
   const char *mainScriptPath = active_config().mainScriptPath;
   if ((mainScriptPath != nullptr) && (mainScriptPath[0] != '\0')) {
     runtime::ScriptComponent sc{};
-    std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", mainScriptPath);
+    std::snprintf(sc.behaviours[0].scriptPath,
+                  sizeof(sc.behaviours[0].scriptPath), "%s", mainScriptPath);
     static_cast<void>(world->add_script_component(sceneControllerEntity, sc));
   }
 }

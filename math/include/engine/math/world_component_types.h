@@ -12,7 +12,7 @@
 
 #include "engine/core/asset_identity.h"
 #include "engine/core/string_util.h"
-#include "engine/math/script_properties.h"
+#include "engine/math/script_behaviours.h"
 #include "engine/math/vec3.h"
 
 namespace engine::math {
@@ -166,14 +166,6 @@ struct SpotLightComponent final {
   /// Renders a depth pass for this light when set; the four nearest
   /// flagged lights cast per frame.
   bool castShadow = false;
-};
-
-// Attaches a Lua script file to an entity.
-// The script must return a module table with optional on_start(self) and
-// on_update(self, dt) functions. Multiple entities may share the same file.
-struct ScriptComponent final {
-  static constexpr std::size_t kMaxPathLength = 127U; // +1 for null terminator
-  char scriptPath[kMaxPathLength + 1U] = {};
 };
 
 // Renderer-facing component; keep minimal to avoid bloating draw commands.

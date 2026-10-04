@@ -202,13 +202,13 @@ bool components_equal(const LightComponent &a,
 }
 
 void make_test_value(ScriptComponent *out) noexcept {
-  std::snprintf(out->scriptPath, sizeof(out->scriptPath), "%s",
+  std::snprintf(out->behaviours[0].scriptPath, sizeof(out->behaviours[0].scriptPath), "%s",
                 "assets/scripts/registry_subject.lua");
 }
 
 bool components_equal(const ScriptComponent &a,
                       const ScriptComponent &b) noexcept {
-  return std::strcmp(a.scriptPath, b.scriptPath) == 0;
+  return std::strcmp(a.behaviours[0].scriptPath, b.behaviours[0].scriptPath) == 0;
 }
 
 void make_test_value(SpringArmComponent *out) noexcept {
@@ -484,14 +484,14 @@ void make_test_value(engine::runtime::ScriptPropertiesComponent *out) noexcept {
   fine.type = ScriptPropertyType::Float;
   fine.floatValue = 0.15F;
   static_cast<void>(
-      engine::runtime::script_properties_set(out, "speed", speed));
+      engine::runtime::script_properties_set(out, 0U, "speed", speed));
   static_cast<void>(
-      engine::runtime::script_properties_set(out, "lives", lives));
+      engine::runtime::script_properties_set(out, 0U, "lives", lives));
   static_cast<void>(
-      engine::runtime::script_properties_set(out, "enabled", enabled));
+      engine::runtime::script_properties_set(out, 0U, "enabled", enabled));
   static_cast<void>(
-      engine::runtime::script_properties_set(out, "target", target));
-  static_cast<void>(engine::runtime::script_properties_set(out, "fine", fine));
+      engine::runtime::script_properties_set(out, 0U, "target", target));
+  static_cast<void>(engine::runtime::script_properties_set(out, 0U, "fine", fine));
 }
 
 bool components_equal(

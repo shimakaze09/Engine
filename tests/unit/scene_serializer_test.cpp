@@ -147,7 +147,7 @@ int build_source_scene(const char *path) {
     return 10;
   }
   engine::runtime::ScriptComponent secondScript{};
-  std::snprintf(secondScript.scriptPath, sizeof(secondScript.scriptPath), "%s",
+  std::snprintf(secondScript.behaviours[0].scriptPath, sizeof(secondScript.behaviours[0].scriptPath), "%s",
                 kRoundTripScriptPath);
   if (!world->add_script_component(second, secondScript)) {
     return 12;
@@ -252,7 +252,7 @@ int build_source_buffer(
     return 51;
   }
   engine::runtime::ScriptComponent secondScript{};
-  std::snprintf(secondScript.scriptPath, sizeof(secondScript.scriptPath), "%s",
+  std::snprintf(secondScript.behaviours[0].scriptPath, sizeof(secondScript.behaviours[0].scriptPath), "%s",
                 kRoundTripScriptPath);
   if (!world->add_script_component(second, secondScript)) {
     return 53;
@@ -369,7 +369,7 @@ int verify_loaded_scene(const char *path) {
 
     engine::runtime::ScriptComponent script{};
     if (world->get_script_component(entity, &script) &&
-        (std::strcmp(script.scriptPath, kRoundTripScriptPath) == 0)) {
+        (std::strcmp(script.behaviours[0].scriptPath, kRoundTripScriptPath) == 0)) {
       foundScriptValue = true;
     }
 
@@ -517,7 +517,7 @@ int verify_loaded_scene_from_buffer(
 
     engine::runtime::ScriptComponent script{};
     if (world->get_script_component(entity, &script) &&
-        (std::strcmp(script.scriptPath, kRoundTripScriptPath) == 0)) {
+        (std::strcmp(script.behaviours[0].scriptPath, kRoundTripScriptPath) == 0)) {
       foundScriptValue = true;
     }
 
@@ -1555,7 +1555,7 @@ int check_every_component_type_survives_load() {
   capture.width = 128U;
   capture.height = 64U;
   ScriptComponent script{};
-  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+  std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s",
                 "assets/scripts/marker.lua");
   SpringArmComponent springArm{};
   springArm.armLength = 4.5F;
@@ -1642,7 +1642,7 @@ int check_every_component_type_survives_load() {
       !loaded->get_scene_capture_component(found, &loadedCapture) ||
       (loadedCapture.width != 128U) || (loadedCapture.height != 64U) ||
       !loaded->get_script_component(found, &loadedScript) ||
-      (std::strcmp(loadedScript.scriptPath, "assets/scripts/marker.lua") !=
+      (std::strcmp(loadedScript.behaviours[0].scriptPath, "assets/scripts/marker.lua") !=
        0) ||
       !loaded->get_spring_arm(found, &loadedSpringArm) ||
       (loadedSpringArm.armLength != 4.5F)) {

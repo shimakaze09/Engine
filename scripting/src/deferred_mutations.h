@@ -103,10 +103,11 @@ bool apply_or_queue_light_component(
 /// Applies or queues light component removal based on the current World phase.
 bool apply_or_queue_remove_light_component(runtime::Entity entity) noexcept;
 
-/// Applies or queues a script component update based on the current World phase.
-bool apply_or_queue_script_component(
-    runtime::Entity entity,
-    const runtime::ScriptComponent &component) noexcept;
+/// Applies or queues replacing the entity's behaviours with the one script
+/// at `scriptPath`, a path that fits ScriptBehaviour::scriptPath whole,
+/// based on the current World phase.
+bool apply_or_queue_script_component(runtime::Entity entity,
+                                     const char *scriptPath) noexcept;
 
 /// Applies or queues script component removal based on the current World phase.
 bool apply_or_queue_remove_script_component(runtime::Entity entity) noexcept;

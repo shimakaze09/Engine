@@ -92,7 +92,7 @@ bool add_scripted_entity(engine::runtime::World &world, const char *name,
     return false;
   }
   engine::runtime::ScriptComponent script{};
-  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+  std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s",
                 scriptPath);
   if (!world.add_script_component(entity, script)) {
     return false;

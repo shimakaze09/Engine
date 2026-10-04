@@ -112,11 +112,14 @@ void validate_scene_references(const World &staged,
                        "scene parent names no entity; child loads as a root");
     }
     const ScriptComponent *script = staged.get_script_component_ptr(entity);
-    if ((script != nullptr) && (script->scriptPath[0] != '\0') &&
-        mounted_path_missing(script->scriptPath)) {
-      report_reference(report, "missing_script", "scriptPath",
-                       script->scriptPath, id,
-                       "scene script path names no file");
+    const std::size_t behaviours =
+        (script != nullptr) ? script_behaviour_count(*script) : 0U;
+    for (std::size_t b = 0U; b < behaviours; ++b) {
+      const char *path = script->behaviours[b].scriptPath;
+      if (mounted_path_missing(path)) {
+        report_reference(report, "missing_script", "scriptPath", path, id,
+                         "scene script path names no file");
+      }
     }
     const AnimationComponent *animation =
         staged.get_animation_component_ptr(entity);
@@ -212,8 +215,7 @@ bool decode_scene_component(const core::JsonParser &parser,
     // bytes a later save would make permanent.
     return parser.copy_string_strict(value, out->name, sizeof(out->name));
   } else if constexpr (std::is_same_v<T, ScriptComponent>) {
-    return parser.copy_string_strict(value, out->scriptPath,
-                                     sizeof(out->scriptPath));
+    return read_script_component(parser, value, false, out);
   } else if constexpr (std::is_same_v<T, AnimationComponent>) {
     return read_animation_component(parser, value, false, out);
   } else if constexpr (std::is_same_v<T, TagSetComponent>) {
@@ -255,9 +257,7 @@ bool encode_scene_component(core::JsonWriter &writer, const char *key,
     writer.write_string(key, component.name);
     return true;
   } else if constexpr (std::is_same_v<T, ScriptComponent>) {
-    if (component.scriptPath[0] != '\0') {
-      writer.write_string(key, component.scriptPath);
-    }
+    write_script_component(writer, key, component);
     return true;
   } else if constexpr (std::is_same_v<T, AnimationComponent>) {
     write_animation_component(writer, key, component);

@@ -162,16 +162,26 @@ std::uint64_t entity_script_mtime_polls() noexcept;
 void check_script_reload() noexcept;
 
 // --- Per-entity script dispatch (ScriptComponent) ---
-// Each entity with a ScriptComponent references a Lua script file that returns
-// a module table. The canonical hooks are on_begin_play(self), on_tick(self,
-// dt), on_end_play(self), on_save_state(self), and on_reload(self, state);
-// legacy on_start/on_update/on_end names remain fallbacks. `self` is an opaque,
-// generation-checked handle. Multiple entities may share the same script file.
+// Each entity with a ScriptComponent lists up to eight behaviours, each a Lua
+// script file that returns a module table, called in list order. The
+// canonical hooks are on_begin_play(self), on_tick(self, dt),
+// on_fixed_tick(self, dt), on_end_play(self), on_save_state(self), and
+// on_reload(self, state); legacy on_start/on_update/on_end names remain
+// fallbacks. `self` is an opaque, generation-checked handle to the entity.
+// Multiple entities may share the same script file; one entity runs a script
+// at most once.
+//
+// Each behaviour has its own lifecycle. A disabled behaviour is neither begun
+// nor ticked. One enabled after its entity began play begins before its first
+// tick. A behaviour whose hook fails is faulted alone and gets nothing more
+// until its script reloads; the entity's others run on. on_end_play reaches
+// exactly the behaviours that began, a since-disabled one included.
 //
 // A changed module file reloads under the same transaction as the main
 // script: its chunk's top-level bindings and effects commit only once it
 // has run cleanly and returned a module table, so a broken save leaves
 // nothing behind and the old module keeps serving. The live instances'
+// (behaviours running that script that are enabled or have begun)
 // on_save_state hooks run only after that, when the swap is certain, and
 // on_reload receives what they returned. A broken save is tried once and
 // again only when the file changes.
@@ -189,7 +199,8 @@ void check_script_reload() noexcept;
 // currently no separate per-fixed-step Lua callback — only on_tick.
 
 // Load all unique script files referenced by ScriptComponents in the world and
-// call module.on_begin_play(self) for each entity. Call once on Play start.
+// call module.on_begin_play(self) for each enabled behaviour. Call once on
+// Play start.
 void dispatch_entity_scripts_start() noexcept;
 
 // Dispatch on_begin_play for entities that need it (newly created), in the
@@ -197,32 +208,34 @@ void dispatch_entity_scripts_start() noexcept;
 // script code. The pending set is snapshotted before any callback runs;
 // entities a callback spawns begin play in a later pass of the same call,
 // up to a bounded pass count, after which the rest wait for the next call.
-// Marks begin_play done on delivery; a failed module load leaves the
-// entity pending and retries under the mtime-gated attempt budget.
+// Marks begin_play done once every enabled behaviour has begun; a failed
+// module load leaves the entity pending and retries that behaviour under
+// the mtime-gated attempt budget, while the ones that loaded begin now.
 void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept;
 
-// Dispatch on_end_play(self) for entities pending deferred destruction.
+// Dispatch on_end_play(self) to the begun behaviours of entities pending
+// deferred destruction.
 void dispatch_entity_scripts_end_play(runtime::World *world) noexcept;
 
 // Restore pending reload state, then call module.on_tick(self, dt) for every
-// entity with a ScriptComponent. Call once per rendered frame that advanced
-// simulation (not once per fixed step); dt is the frame's total simulated
-// time — see the on_tick cadence note above.
+// enabled behaviour of every scripted entity. Call once per rendered frame
+// that advanced simulation (not once per fixed step); dt is the frame's
+// total simulated time — see the on_tick cadence note above.
 void dispatch_entity_scripts_update(float dt) noexcept;
 
-// Call module.on_fixed_tick(self, dt) for every entity with a
-// ScriptComponent, with dt the fixed step. Call once per fixed step, in
+// Call module.on_fixed_tick(self, dt) for every enabled behaviour of every
+// scripted entity, with dt the fixed step. Call once per fixed step, in
 // step order, while that step's input snapshot is current (see
 // core::advance_input_step), so the input queries a hook makes answer for
 // its own step. A module without the hook is skipped.
 void dispatch_entity_scripts_fixed_update(float dt) noexcept;
 
-// Call module.on_end_play(self) for every entity with a ScriptComponent.
-// Call once when Play transitions to Stopped.
+// Call module.on_end_play(self) for every behaviour that began play, on
+// every scripted entity. Call once when Play transitions to Stopped.
 void dispatch_entity_scripts_end() noexcept;
 
-// Call module.on_end_play(self) for every entity with a ScriptComponent in
-// the outgoing world, immediately before a script-driven scene transition
+// Call module.on_end_play(self) for every begun behaviour in the outgoing
+// world, immediately before a script-driven scene transition
 // (engine.load_scene/engine.new_scene) commits its replacement content;
 // same dispatch as dispatch_entity_scripts_end but additionally
 // rejects a handler's own load_scene/new_scene call and defers rather than

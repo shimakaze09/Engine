@@ -111,7 +111,7 @@ bool write_scene() noexcept {
   }
   const engine::runtime::Entity scripted = author->create_scene_object();
   engine::runtime::ScriptComponent script{};
-  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+  std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s",
                 kScriptPath);
   return add_tagged(*author, "CoinA", "coin") &&
          add_tagged(*author, "CoinB", "Coin") &&

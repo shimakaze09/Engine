@@ -86,7 +86,7 @@ bool chain_fired_is(int expected) noexcept {
 bool add_chain_root(rt::World &world) noexcept {
   const rt::Entity root = world.create_scene_object(rt::Transform{});
   rt::ScriptComponent script{};
-  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s", kChainPath);
+  std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s", kChainPath);
   return (root != rt::kInvalidEntity) &&
          world.add_script_component(root, script);
 }

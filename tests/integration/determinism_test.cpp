@@ -142,11 +142,11 @@ bool populate_world(engine::runtime::World &world,
   // physics the rest of this scene is about.
   const engine::runtime::Entity scripted = world.create_scene_object();
   engine::runtime::ScriptComponent script{};
-  const int written = std::snprintf(script.scriptPath,
-                                    sizeof(script.scriptPath), "%s",
+  const int written = std::snprintf(script.behaviours[0].scriptPath,
+                                    sizeof(script.behaviours[0].scriptPath), "%s",
                                     kRandomScriptPath);
   if ((written < 0) ||
-      (static_cast<std::size_t>(written) >= sizeof(script.scriptPath)) ||
+      (static_cast<std::size_t>(written) >= sizeof(script.behaviours[0].scriptPath)) ||
       (scripted == engine::runtime::kInvalidEntity) ||
       !world.add_script_component(scripted, script)) {
     return false;

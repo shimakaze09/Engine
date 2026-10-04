@@ -1187,18 +1187,19 @@ bool World::add_script_component(Entity entity,
     return false;
   }
 
-  // A path is an identity: a truncated copy would name a different file
-  // (or none), so an over-long one is refused and nothing is added.
-  ScriptComponent safe{};
-  if (!core::copy_string_strict(safe.scriptPath, sizeof(safe.scriptPath),
-                                component.scriptPath)) {
-    log_identity_overflow("add_script_component", "scriptPath",
-                          ScriptComponent::kMaxPathLength);
+  // A path is an identity: an unterminated one would be read past its end
+  // and a truncated copy would name a different file, so a malformed list
+  // (an unterminated path, a gap, a repeated script) is refused whole.
+  if (!script_component_is_valid(component)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_script_component refused: a behaviour path is "
+                      "unterminated, the list has a gap, or a script "
+                      "repeats");
     note_refusal(core::FailureKind::InvalidArgument);
     return false;
   }
 
-  if (!m_scriptComponents.add(entity, safe)) {
+  if (!m_scriptComponents.add(entity, component)) {
     note_refusal(core::FailureKind::CapacityExhausted);
     return false;
   }

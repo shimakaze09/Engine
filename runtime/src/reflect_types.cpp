@@ -70,8 +70,8 @@ REFLECT_END()
 
 REFLECT_TYPE(engine::runtime::ScriptComponent)
 static_cast<void>(desc);
-// Intentionally registers a zero-field descriptor. ScriptComponent::scriptPath
-// is a fixed char array serialized manually.
+// Intentionally registers a zero-field descriptor. The behaviour list is an
+// array of fixed char paths and flags, serialized manually.
 REFLECT_END()
 
 REFLECT_TYPE(engine::runtime::AnimationComponent)

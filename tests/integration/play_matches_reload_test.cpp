@@ -122,7 +122,7 @@ engine::runtime::Entity add_scripted(engine::runtime::World &world,
 bool attach_script(engine::runtime::World &world,
                    engine::runtime::Entity entity) noexcept {
   engine::runtime::ScriptComponent script{};
-  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+  std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s",
                 kOrderScriptPath);
   return world.add_script_component(entity, script);
 }

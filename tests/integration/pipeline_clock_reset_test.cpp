@@ -208,7 +208,7 @@ int main() {
     const engine::runtime::Entity scripted = g_world->create_scene_object();
     CHECK(scripted != engine::runtime::kInvalidEntity, "spawn scripted");
     engine::runtime::ScriptComponent sc{};
-    std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kScriptPath);
+    std::snprintf(sc.behaviours[0].scriptPath, sizeof(sc.behaviours[0].scriptPath), "%s", kScriptPath);
     CHECK(g_world->add_script_component(scripted, sc), "attach script");
 
     CHECK(ticking_frame(pipeline), "run B frame 1");

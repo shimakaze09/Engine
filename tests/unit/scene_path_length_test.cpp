@@ -67,7 +67,7 @@ int check_scene_script_path_rejection() {
   }
 
   const std::string longPath(
-      sizeof(engine::runtime::ScriptComponent::scriptPath), 'a');
+      sizeof(engine::runtime::ScriptBehaviour::scriptPath), 'a');
   const std::string overlongScene =
       make_scene_json("ScriptComponent", longPath);
   if (engine::runtime::load_scene(*world, overlongScene.c_str(),
@@ -79,7 +79,7 @@ int check_scene_script_path_rejection() {
   }
 
   const std::string maxPath(
-      sizeof(engine::runtime::ScriptComponent::scriptPath) - 1U, 'b');
+      sizeof(engine::runtime::ScriptBehaviour::scriptPath) - 1U, 'b');
   const std::string maxScene = make_scene_json("ScriptComponent", maxPath);
   if (!engine::runtime::load_scene(*world, maxScene.c_str(),
                                    maxScene.size())) {
@@ -90,7 +90,7 @@ int check_scene_script_path_rejection() {
     const engine::runtime::ScriptComponent *script =
         world->get_script_component_ptr(entity);
     if ((script != nullptr) &&
-        (std::strcmp(script->scriptPath, maxPath.c_str()) == 0)) {
+        (std::strcmp(script->behaviours[0].scriptPath, maxPath.c_str()) == 0)) {
       found = true;
     }
   });
@@ -127,7 +127,7 @@ int check_prefab_path_rejection() {
   }
 
   const std::string longPath(
-      sizeof(engine::runtime::ScriptComponent::scriptPath), 'd');
+      sizeof(engine::runtime::ScriptBehaviour::scriptPath), 'd');
   std::string prefab =
       "{\"version\":5,\"components\":{\"ScriptComponent\":\"";
   prefab += longPath;

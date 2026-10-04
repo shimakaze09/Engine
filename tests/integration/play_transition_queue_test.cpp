@@ -153,11 +153,11 @@ engine::runtime::Entity spawn_scripted(const char *scriptPath) noexcept {
     return entity;
   }
   engine::runtime::ScriptComponent script{};
-  const int written = std::snprintf(script.scriptPath,
-                                    sizeof(script.scriptPath), "%s",
+  const int written = std::snprintf(script.behaviours[0].scriptPath,
+                                    sizeof(script.behaviours[0].scriptPath), "%s",
                                     scriptPath);
   if ((written < 0) ||
-      (static_cast<std::size_t>(written) >= sizeof(script.scriptPath)) ||
+      (static_cast<std::size_t>(written) >= sizeof(script.behaviours[0].scriptPath)) ||
       !g_world->add_script_component(entity, script)) {
     return engine::runtime::kInvalidEntity;
   }

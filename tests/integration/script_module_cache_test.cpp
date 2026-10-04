@@ -208,7 +208,7 @@ bool run_dispatch_round(engine::core::ServiceLocator &serviceLocator, int total,
     rt::ScriptComponent script{};
     char name[64] = {};
     entity_script_name(i, name);
-    std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s", name);
+    std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s", name);
     ok = (entity != rt::kInvalidEntity) &&
          world->add_script_component(entity, script);
   }

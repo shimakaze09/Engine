@@ -45,6 +45,10 @@ int lua_engine_require(lua_State *state) noexcept;
 /// does not load.
 bool push_entity_script_module(lua_State *state, const char *path) noexcept;
 
+/// The script path of the behaviour whose hook is running, when that hook
+/// belongs to `entity`; nullptr outside a hook or for another entity.
+const char *running_hook_script(core::Entity entity) noexcept;
+
 /// Clears cached entity script modules and hot-reload state.
 void reset_entity_script_bindings() noexcept;
 

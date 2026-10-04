@@ -141,7 +141,7 @@ int main() {
     CHECK(pipeline.execute_frame(), "settle frame");
     const engine::runtime::Entity entity = g_world->create_scene_object();
     engine::runtime::ScriptComponent script{};
-    std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+    std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s",
                   kScriptPath);
     CHECK((entity != engine::runtime::kInvalidEntity) &&
               g_world->add_script_component(entity, script),

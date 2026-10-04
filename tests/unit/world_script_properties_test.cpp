@@ -60,46 +60,48 @@ ScriptPropertyValue integer_value(std::int64_t value) {
 
 void check_set_rules() {
   ScriptPropertiesComponent set{};
-  check(engine::runtime::script_properties_set(&set, "speed",
+  check(engine::runtime::script_properties_set(&set, 0U, "speed",
                                                float_value(2.0F)) &&
-            engine::runtime::script_properties_set(&set, "lives",
+            engine::runtime::script_properties_set(&set, 0U, "lives",
                                                    integer_value(3)) &&
-            engine::runtime::script_properties_set(&set, "speed",
+            engine::runtime::script_properties_set(&set, 0U, "speed",
                                                    float_value(4.0F)) &&
             (set.count == 2U) &&
             (std::strcmp(set.overrides[0].name, "speed") == 0) &&
             (set.overrides[0].value.floatValue == 4.0F),
         "rules: setting a name again replaces it in place");
-  check(!engine::runtime::script_properties_set(&set, "9lives",
+  check(!engine::runtime::script_properties_set(&set, 0U, "9lives",
                                                 integer_value(1)) &&
-            !engine::runtime::script_properties_set(&set, "has space",
+            !engine::runtime::script_properties_set(&set, 0U, "has space",
                                                     integer_value(1)) &&
             !engine::runtime::script_properties_set(
-                &set, "a_name_of_thirty_two_characters_", integer_value(1)) &&
+                &set, 0U, "a_name_of_thirty_two_characters_",
+                integer_value(1)) &&
             (set.count == 2U),
         "rules: a name that is not a Lua identifier of at most 31 bytes is "
         "refused");
   check(!engine::runtime::script_properties_set(
-            &set, "bad", float_value(std::numeric_limits<float>::infinity())),
+            &set, 0U, "bad",
+            float_value(std::numeric_limits<float>::infinity())),
         "rules: a non-finite float is refused");
   ScriptPropertyValue mixed = integer_value(1);
   mixed.floatValue = 1.0F;
-  check(!engine::runtime::script_properties_set(&set, "mixed", mixed),
+  check(!engine::runtime::script_properties_set(&set, 0U, "mixed", mixed),
         "rules: a value with a member its type does not use is refused");
-  check(engine::runtime::script_properties_clear(&set, "speed") &&
+  check(engine::runtime::script_properties_clear(&set, 0U, "speed") &&
             (set.count == 1U) &&
             (std::strcmp(set.overrides[0].name, "lives") == 0) &&
-            !engine::runtime::script_properties_clear(&set, "speed"),
+            !engine::runtime::script_properties_clear(&set, 0U, "speed"),
         "rules: clearing removes one override and keeps the rest in order");
   ScriptPropertiesComponent full{};
   bool allSet = true;
   for (std::size_t i = 0U; i < ScriptPropertiesComponent::kMaxOverrides; ++i) {
     char name[8] = {};
     std::snprintf(name, sizeof(name), "p%zu", i);
-    allSet = allSet && engine::runtime::script_properties_set(&full, name,
+    allSet = allSet && engine::runtime::script_properties_set(&full, 0U, name,
                                                               integer_value(1));
   }
-  check(allSet && !engine::runtime::script_properties_set(&full, "extra",
+  check(allSet && !engine::runtime::script_properties_set(&full, 0U, "extra",
                                                           integer_value(1)),
         "rules: one past kMaxOverrides is refused");
 }
@@ -121,7 +123,7 @@ void check_world_ingress() {
             (world->get_script_properties_ptr(entity) == nullptr),
         "ingress: a repeated name is refused whole");
   ScriptPropertiesComponent valid{};
-  static_cast<void>(engine::runtime::script_properties_set(&valid, "speed",
+  static_cast<void>(engine::runtime::script_properties_set(&valid, 0U, "speed",
                                                            float_value(1.5F)));
   check(world->add_script_properties(entity, valid) &&
             (world->get_script_properties_ptr(entity) != nullptr) &&
@@ -137,7 +139,7 @@ void check_capacity() {
   }
   ScriptPropertiesComponent set{};
   static_cast<void>(
-      engine::runtime::script_properties_set(&set, "speed", float_value(1.0F)));
+      engine::runtime::script_properties_set(&set, 0U, "speed", float_value(1.0F)));
   bool allAdded = true;
   for (std::size_t i = 0U; i < World::kMaxScriptPropertiesComponents; ++i) {
     allAdded =
@@ -175,14 +177,14 @@ void check_scene_round_trip() {
   ScriptPropertyValue name{};
   name.type = ScriptPropertyType::String;
   std::snprintf(name.text, sizeof(name.text), "%s", "Main Camera");
-  check(engine::runtime::script_properties_set(&set, "speed",
+  check(engine::runtime::script_properties_set(&set, 0U, "speed",
                                                float_value(3.0F)) &&
-            engine::runtime::script_properties_set(&set, "drop",
+            engine::runtime::script_properties_set(&set, 0U, "drop",
                                                    float_value(-0.15F)) &&
-            engine::runtime::script_properties_set(&set, "lives",
+            engine::runtime::script_properties_set(&set, 0U, "lives",
                                                    integer_value(3)) &&
-            engine::runtime::script_properties_set(&set, "on", flag) &&
-            engine::runtime::script_properties_set(&set, "camera", name),
+            engine::runtime::script_properties_set(&set, 0U, "on", flag) &&
+            engine::runtime::script_properties_set(&set, 0U, "camera", name),
         "scene: override set built");
   check((plain != kInvalidEntity) &&
             source->add_script_properties(emptySet,

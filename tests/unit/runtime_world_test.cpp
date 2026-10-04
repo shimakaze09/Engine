@@ -959,8 +959,8 @@ int verify_destroy_removes_script_component() {
   }
 
   engine::runtime::ScriptComponent script{};
-  script.scriptPath[0] = 'x';
-  script.scriptPath[1] = '\0';
+  script.behaviours[0].scriptPath[0] = 'x';
+  script.behaviours[0].scriptPath[1] = '\0';
   if (!world->add_script_component(entity, script)) {
     return 142;
   }
@@ -1008,19 +1008,19 @@ int verify_identity_paths_refuse_overflow() {
   }
 
   ScriptComponent overlongScript{};
-  std::memset(overlongScript.scriptPath, 'p', sizeof(overlongScript.scriptPath));
+  std::memset(overlongScript.behaviours[0].scriptPath, 'p', sizeof(overlongScript.behaviours[0].scriptPath));
   if (world->add_script_component(entity, overlongScript) ||
       (world->get_script_component_ptr(entity) != nullptr)) {
     return 162;
   }
   ScriptComponent boundScript{};
-  std::memset(boundScript.scriptPath, 'p', ScriptComponent::kMaxPathLength);
+  std::memset(boundScript.behaviours[0].scriptPath, 'p', ScriptComponent::kMaxPathLength);
   if (!world->add_script_component(entity, boundScript)) {
     return 163;
   }
   const ScriptComponent *storedScript = world->get_script_component_ptr(entity);
   if ((storedScript == nullptr) ||
-      (std::strcmp(storedScript->scriptPath, boundScript.scriptPath) != 0)) {
+      (std::strcmp(storedScript->behaviours[0].scriptPath, boundScript.behaviours[0].scriptPath) != 0)) {
     return 164;
   }
 

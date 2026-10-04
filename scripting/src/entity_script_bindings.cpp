@@ -67,13 +67,40 @@ constexpr std::size_t kMaxCaptureDepth = 2U;
 /// the next frame's dispatch.
 constexpr std::size_t kMaxBeginPlayPasses = 8U;
 constexpr std::size_t kScriptPathSize =
-    runtime::ScriptComponent::kMaxPathLength + 1U;
+    math::ScriptBehaviour::kMaxPathLength + 1U;
+constexpr std::size_t kMaxBehaviours = math::kMaxScriptBehaviours;
 
-/// Owns one per-entity table captured while replacing a Lua module.
-struct EntitySavedState final {
+/// Set once the behaviour's on_begin_play has been called: it then ticks,
+/// and receives on_end_play when its entity ends play.
+constexpr std::uint8_t kBehaviourBegun = 1U;
+/// Set when one of the behaviour's hooks failed; it receives nothing more
+/// until its script reloads.
+constexpr std::uint8_t kBehaviourFaulted = 2U;
+
+/// The run-time state of one behaviour instance. A script appears at most
+/// once in an entity's list, so the module it runs names the instance and
+/// the state survives the list being reordered.
+struct BehaviourState final {
+  /// Module table slot + 1; 0 marks an unused entry.
+  std::uint16_t moduleKey = 0U;
+  std::uint8_t flags = 0U;
+  /// The table on_save_state returned while its module was replaced, held
+  /// until on_reload receives it.
+  int savedStateRef = LUA_NOREF;
+};
+
+/// The behaviour states of one entity generation, indexed by entity index.
+struct EntityBehaviourStates final {
   core::Entity owner = core::kInvalidEntity;
-  std::size_t moduleSlot = kInvalidModuleSlot;
-  int registryRef = LUA_NOREF;
+  BehaviourState entries[kMaxBehaviours]{};
+};
+
+/// One entity's behaviour list, copied before any hook runs so a callback
+/// that edits the list changes the next dispatch, not this one.
+struct BehaviourSnapshot final {
+  std::size_t count = 0U;
+  char paths[kMaxBehaviours][kScriptPathSize] = {};
+  bool enabled[kMaxBehaviours] = {};
 };
 
 lua_State *g_state = nullptr;
@@ -90,8 +117,10 @@ std::uint16_t g_moduleIndex[kModuleIndexBuckets]{};
 std::uint64_t g_reportedRefusals[kMaxReportedRefusals]{};
 std::size_t g_reportedRefusalCount = 0U;
 bool g_hasPendingEntityReloads = false;
-core::Entity g_entityFaulted[kMaxFaultedEntities]{};
-EntitySavedState g_entitySavedState[kMaxFaultedEntities]{};
+EntityBehaviourStates g_behaviourStates[kMaxFaultedEntities]{};
+// The behaviour whose hook is running: its entity and module slot.
+core::Entity g_hookEntity = core::kInvalidEntity;
+std::size_t g_hookModuleSlot = kInvalidModuleSlot;
 char g_moduleLoadStack[kMaxModuleLoadDepth][128]{};
 std::size_t g_moduleLoadDepth = 0U;
 int g_endPlayDispatchDepth = 0;
@@ -221,7 +250,7 @@ void snapshot_scripted_visit(core::Entity entity,
                              const runtime::ScriptComponent &sc,
                              void *context) noexcept {
   auto *snapshot = static_cast<ScriptedSnapshot *>(context);
-  if ((sc.scriptPath[0] == '\0') ||
+  if ((math::script_behaviour_count(sc) == 0U) ||
       (snapshot->count >= kMaxScriptDispatchEntries)) {
     return;
   }
@@ -246,20 +275,28 @@ std::size_t snapshot_script_dispatch_order() noexcept {
   return snapshot_scripted_entities(g_scriptDispatchOrder);
 }
 
-/// Copies an entity's live script path into caller-owned storage so
-/// re-entrant Lua cannot mutate the dense component slot it points into;
-/// false when the component is missing or the path is empty.
-bool copy_entity_script_path(runtime::World *world, runtime::Entity entity,
-                             char (&outPath)[kScriptPathSize]) noexcept {
-  runtime::ScriptComponent sc{};
+/// Copies an entity's behaviour list into caller-owned storage so
+/// re-entrant Lua cannot change the dense component slot it points into;
+/// false when the entity has no behaviour.
+bool snapshot_entity_behaviours(runtime::World *world, runtime::Entity entity,
+                                BehaviourSnapshot *out) noexcept {
+  out->count = 0U;
   if (!runtime_bound() ||
-      !runtime_binding().services->get_script_component_op(world, entity,
-                                                           &sc) ||
-      (sc.scriptPath[0] == '\0')) {
+      (runtime_binding().services->find_script_component_op == nullptr)) {
     return false;
   }
-  std::snprintf(outPath, sizeof(outPath), "%s", sc.scriptPath);
-  return true;
+  const runtime::ScriptComponent *sc =
+      runtime_binding().services->find_script_component_op(world, entity);
+  if (sc == nullptr) {
+    return false;
+  }
+  const std::size_t count = math::script_behaviour_count(*sc);
+  for (std::size_t i = 0U; i < count; ++i) {
+    std::memcpy(out->paths[i], sc->behaviours[i].scriptPath, kScriptPathSize);
+    out->enabled[i] = sc->behaviours[i].enabled;
+  }
+  out->count = count;
+  return count > 0U;
 }
 
 /// True when `entity` is live in `world`; the bridge answers.
@@ -268,47 +305,143 @@ bool world_entity_alive(runtime::World *world,
   return runtime_bound() && runtime_binding().services->is_alive(world, entity);
 }
 
-/// Returns whether this exact entity generation has faulted.
-bool entity_is_faulted(core::Entity entity) noexcept {
-  return (entity.index > 0U) && (entity.index < kMaxFaultedEntities) &&
-         (g_entityFaulted[entity.index] == entity);
-}
-
-/// Records a script fault against the exact entity generation.
-void mark_entity_faulted(core::Entity entity) noexcept {
-  if ((entity.index > 0U) && (entity.index < kMaxFaultedEntities)) {
-    g_entityFaulted[entity.index] = entity;
+/// Releases one saved-state registry reference.
+void release_saved_state(BehaviourState &state) noexcept {
+  if ((g_state != nullptr) && (state.savedStateRef != LUA_NOREF)) {
+    luaL_unref(g_state, LUA_REGISTRYINDEX, state.savedStateRef);
   }
+  state.savedStateRef = LUA_NOREF;
 }
 
-/// Clears any script fault stored in this entity index slot.
-void clear_entity_fault(core::Entity entity) noexcept {
-  if ((entity.index > 0U) && (entity.index < kMaxFaultedEntities)) {
-    g_entityFaulted[entity.index] = core::kInvalidEntity;
+/// The behaviour states of this exact entity generation, or nullptr. With
+/// `claim`, an index slot still holding an older generation's states is
+/// cleared and taken.
+EntityBehaviourStates *entity_states(core::Entity entity, bool claim) noexcept {
+  if ((entity.index == 0U) || (entity.index >= kMaxFaultedEntities)) {
+    return nullptr;
   }
-}
-
-/// Releases one saved-state registry reference and resets its owner metadata.
-void release_entity_saved_state(EntitySavedState &savedState) noexcept {
-  if ((g_state != nullptr) && (savedState.registryRef != LUA_NOREF)) {
-    luaL_unref(g_state, LUA_REGISTRYINDEX, savedState.registryRef);
+  EntityBehaviourStates &states = g_behaviourStates[entity.index];
+  if (states.owner == entity) {
+    return &states;
   }
-  savedState = EntitySavedState{};
-}
-
-/// Releases all saved-state registry references for entity script hot reload.
-void clear_entity_saved_state() noexcept {
-  for (EntitySavedState &savedState : g_entitySavedState) {
-    release_entity_saved_state(savedState);
+  if (!claim) {
+    return nullptr;
   }
+  for (BehaviourState &state : states.entries) {
+    release_saved_state(state);
+    state = BehaviourState{};
+  }
+  states.owner = entity;
+  return &states;
 }
 
-/// Releases saved-state references captured for one cached module slot.
-void clear_entity_saved_state_for_module(std::size_t moduleSlot) noexcept {
-  for (EntitySavedState &savedState : g_entitySavedState) {
-    if (savedState.moduleSlot == moduleSlot) {
-      release_entity_saved_state(savedState);
+/// The state of the behaviour running module `moduleSlot` on `entity`, or
+/// nullptr when it has none yet.
+BehaviourState *find_behaviour_state(core::Entity entity,
+                                     std::size_t moduleSlot) noexcept {
+  EntityBehaviourStates *states = entity_states(entity, false);
+  if ((states == nullptr) || (moduleSlot >= kMaxEntityScriptModules)) {
+    return nullptr;
+  }
+  for (BehaviourState &state : states->entries) {
+    if (state.moduleKey == moduleSlot + 1U) {
+      return &state;
     }
+  }
+  return nullptr;
+}
+
+/// The state of the behaviour running module `moduleSlot` on `entity`,
+/// creating it when absent. When every entry is taken, one whose module
+/// the entity no longer lists (a removed or replaced behaviour) is
+/// reused; nullptr only for an invalid entity or slot.
+BehaviourState *claim_behaviour_state(core::Entity entity,
+                                      std::size_t moduleSlot,
+                                      const BehaviourSnapshot &list) noexcept {
+  if (BehaviourState *found = find_behaviour_state(entity, moduleSlot)) {
+    return found;
+  }
+  EntityBehaviourStates *states = entity_states(entity, true);
+  if ((states == nullptr) || (moduleSlot >= kMaxEntityScriptModules)) {
+    return nullptr;
+  }
+  BehaviourState *chosen = nullptr;
+  for (BehaviourState &state : states->entries) {
+    if (state.moduleKey == 0U) {
+      chosen = &state;
+      break;
+    }
+  }
+  for (std::size_t i = 0U; (chosen == nullptr) && (i < kMaxBehaviours); ++i) {
+    BehaviourState &state = states->entries[i];
+    const std::size_t stateSlot = state.moduleKey - 1U;
+    bool listed = false;
+    for (std::size_t b = 0U; b < list.count; ++b) {
+      listed = listed || (find_module_slot(list.paths[b]) == stateSlot);
+    }
+    if (!listed) {
+      chosen = &state;
+    }
+  }
+  if (chosen == nullptr) {
+    return nullptr;
+  }
+  release_saved_state(*chosen);
+  *chosen = BehaviourState{};
+  chosen->moduleKey = static_cast<std::uint16_t>(moduleSlot + 1U);
+  return chosen;
+}
+
+/// True when the behaviour has the given flag.
+bool behaviour_has(core::Entity entity, std::size_t moduleSlot,
+                   std::uint8_t flag) noexcept {
+  const BehaviourState *state = find_behaviour_state(entity, moduleSlot);
+  return (state != nullptr) && ((state->flags & flag) != 0U);
+}
+
+/// Records a fault against the behaviour, so it receives nothing more
+/// until its script reloads; the entity's other behaviours run on.
+void mark_behaviour_faulted(core::Entity entity,
+                            std::size_t moduleSlot) noexcept {
+  EntityBehaviourStates *states = entity_states(entity, true);
+  if ((states == nullptr) || (moduleSlot >= kMaxEntityScriptModules)) {
+    return;
+  }
+  for (BehaviourState &state : states->entries) {
+    if (state.moduleKey == moduleSlot + 1U) {
+      state.flags |= kBehaviourFaulted;
+      return;
+    }
+  }
+  for (BehaviourState &state : states->entries) {
+    if (state.moduleKey == 0U) {
+      state.moduleKey = static_cast<std::uint16_t>(moduleSlot + 1U);
+      state.flags = kBehaviourFaulted;
+      return;
+    }
+  }
+}
+
+/// Releases the saved-state references captured for one module slot.
+void clear_saved_states_for_module(std::size_t moduleSlot) noexcept {
+  for (EntityBehaviourStates &states : g_behaviourStates) {
+    for (BehaviourState &state : states.entries) {
+      if (state.moduleKey == moduleSlot + 1U) {
+        release_saved_state(state);
+      }
+    }
+  }
+}
+
+/// Forgets every behaviour state, for a module table cleared with the
+/// world it served.
+void clear_behaviour_states() noexcept {
+  for (EntityBehaviourStates &states : g_behaviourStates) {
+    for (BehaviourState &state : states.entries) {
+      release_saved_state(state);
+      state = BehaviourState{};
+    }
+    states.owner = core::kInvalidEntity;
   }
 }
 
@@ -328,6 +461,7 @@ bool module_is_currently_loading(const char *path) noexcept {
 /// Carries one module-function invocation into a protected trampoline.
 struct ModuleCallArgs final {
   int moduleRef = LUA_NOREF;
+  std::size_t moduleSlot = kInvalidModuleSlot;
   const char *funcName = nullptr;
   const char *fallbackName = nullptr;
   runtime::Entity entity{};
@@ -336,6 +470,23 @@ struct ModuleCallArgs final {
   int savedStateRef = LUA_NOREF;
   bool called = false;
 };
+
+/// Runs `trampoline` as a protected engine dispatch with the behaviour it
+/// calls recorded as the running hook, so engine.get_property(self, ...)
+/// reads that behaviour's values. The previous hook is restored after, as
+/// one hook may run another entity's through an engine call.
+bool protected_hook_dispatch(lua_CFunction trampoline, ModuleCallArgs *args,
+                             int results, const char *context) noexcept {
+  const core::Entity previousEntity = g_hookEntity;
+  const std::size_t previousSlot = g_hookModuleSlot;
+  g_hookEntity = args->entity;
+  g_hookModuleSlot = args->moduleSlot;
+  const bool ok =
+      protected_engine_dispatch(g_state, trampoline, args, results, context);
+  g_hookEntity = previousEntity;
+  g_hookModuleSlot = previousSlot;
+  return ok;
+}
 
 /// Protected trampoline: resolves on_save_state on the module table and
 /// calls it with the entity handle, returning its single result, so
@@ -369,15 +520,30 @@ bool returns_module_table(lua_State *state, void *) noexcept {
   return false;
 }
 
-/// Captures state from every live entity using one cached module. The
-/// walk runs over a pre-walk snapshot with per-entity revalidation
-/// (alive + path match against a local copy) because on_save_state can
-/// destroy scripted entities mid-walk; nested captures (an on_save_state
-/// hook requiring another changed module) get their own snapshot buffer
-/// up to kMaxCaptureDepth, beyond which capture is skipped with an error.
+/// True when `list` runs `modPath` in a behaviour that is enabled or has
+/// begun play: the instances a reload saves and restores.
+bool behaviour_is_live(core::Entity entity, std::size_t moduleSlot,
+                       const char *modPath,
+                       const BehaviourSnapshot &list) noexcept {
+  for (std::size_t b = 0U; b < list.count; ++b) {
+    if (std::strcmp(list.paths[b], modPath) == 0) {
+      return list.enabled[b] ||
+             behaviour_has(entity, moduleSlot, kBehaviourBegun);
+    }
+  }
+  return false;
+}
+
+/// Captures state from every live behaviour (enabled, or begun) that runs
+/// one cached module. The walk runs over a pre-walk snapshot with per-entity
+/// revalidation (alive + the module still listed, against a local copy)
+/// because on_save_state can destroy scripted entities mid-walk; nested
+/// captures (an on_save_state hook requiring another changed module) get
+/// their own snapshot buffer up to kMaxCaptureDepth, beyond which capture
+/// is skipped with an error.
 void capture_entity_saved_state(std::size_t moduleSlot,
                                 const EntityScriptModule &mod) noexcept {
-  clear_entity_saved_state_for_module(moduleSlot);
+  clear_saved_states_for_module(moduleSlot);
   if ((g_state == nullptr) || !runtime_bound() ||
       (mod.registryRef == LUA_NOREF)) {
     return;
@@ -400,19 +566,19 @@ void capture_entity_saved_state(std::size_t moduleSlot,
   const std::size_t count = snapshot_scripted_entities(order);
   for (std::size_t i = 0U; i < count; ++i) {
     const core::Entity entity = order[i];
-    char path[kScriptPathSize] = {};
-    if ((entity.index == 0U) || (entity.index >= kMaxFaultedEntities) ||
-        !world_entity_alive(world, entity) ||
-        !copy_entity_script_path(world, entity, path) ||
-        (std::strcmp(path, modPath) != 0)) {
+    BehaviourSnapshot list{};
+    if (!world_entity_alive(world, entity) ||
+        !snapshot_entity_behaviours(world, entity, &list) ||
+        !behaviour_is_live(entity, moduleSlot, modPath, list)) {
       continue;
     }
 
     ModuleCallArgs args{};
     args.moduleRef = moduleRef;
+    args.moduleSlot = moduleSlot;
     args.entity = entity;
-    if (!protected_engine_dispatch(g_state, &module_save_state_trampoline,
-                                   &args, 1, "on_save_state")) {
+    if (!protected_hook_dispatch(&module_save_state_trampoline, &args, 1,
+                                 "on_save_state")) {
       continue;
     }
 
@@ -426,11 +592,13 @@ void capture_entity_saved_state(std::size_t moduleSlot,
                                 "ref on_save_state result")) {
       continue;
     }
-    EntitySavedState &savedState = g_entitySavedState[entity.index];
-    release_entity_saved_state(savedState);
-    savedState.owner = entity;
-    savedState.moduleSlot = moduleSlot;
-    savedState.registryRef = stateRef;
+    BehaviourState *state = claim_behaviour_state(entity, moduleSlot, list);
+    if (state == nullptr) {
+      luaL_unref(g_state, LUA_REGISTRYINDEX, stateRef);
+      continue;
+    }
+    release_saved_state(*state);
+    state->savedStateRef = stateRef;
   }
   --g_captureDepth;
 }
@@ -605,7 +773,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
         if (!protected_registry_ref(g_state, &newRef,
                                     "ref entity script module")) {
           mod.lastFailedMtime = currentMtime;
-          clear_entity_saved_state_for_module(i);
+          clear_saved_states_for_module(i);
           return mod.registryRef;
         }
         if (mod.registryRef != LUA_NOREF) {
@@ -638,7 +806,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
       report_module_refusal(path);
       return LUA_NOREF;
     }
-    clear_entity_saved_state_for_module(slot);
+    clear_saved_states_for_module(slot);
   }
 
   EntityScriptModule &mod = g_entityScriptModules[slot];
@@ -680,10 +848,12 @@ int module_call_trampoline(lua_State *state) noexcept {
   return 0;
 }
 
-/// Calls an entity module function with optional fallback and delta time.
-bool call_module_function(int moduleRef, const char *funcName,
-                          const char *fallbackName, runtime::Entity entity,
-                          bool hasDt, float dt) noexcept {
+/// Calls one behaviour's module function with optional fallback and delta
+/// time; a hook that fails faults that behaviour alone.
+bool call_module_function(int moduleRef, std::size_t moduleSlot,
+                          const char *funcName, const char *fallbackName,
+                          runtime::Entity entity, bool hasDt,
+                          float dt) noexcept {
   if ((g_state == nullptr) || (moduleRef == LUA_NOREF)) {
     return false;
   }
@@ -694,20 +864,20 @@ bool call_module_function(int moduleRef, const char *funcName,
   // next frame, so which scripts run in an over-budget frame is decided by
   // the dispatch order and the budget alone. Only a hook whose own run
   // fails -- an error, or the run that exhausted the budget -- faults its
-  // entity.
+  // behaviour.
   if (skip_dispatch_for_spent_budget(funcName)) {
     return false;
   }
   ModuleCallArgs args{};
   args.moduleRef = moduleRef;
+  args.moduleSlot = moduleSlot;
   args.funcName = funcName;
   args.fallbackName = fallbackName;
   args.entity = entity;
   args.hasDt = hasDt;
   args.dt = dt;
-  if (!protected_engine_dispatch(g_state, &module_call_trampoline, &args, 0,
-                                 funcName)) {
-    mark_entity_faulted(entity);
+  if (!protected_hook_dispatch(&module_call_trampoline, &args, 0, funcName)) {
+    mark_behaviour_faulted(entity, moduleSlot);
     return false;
   }
   return args.called;
@@ -741,7 +911,8 @@ int module_reload_trampoline(lua_State *state) noexcept {
 }
 
 /// Invokes on_reload with the entity handle and its captured state table.
-ReloadHookResult call_module_reload_hook(int moduleRef, runtime::Entity entity,
+ReloadHookResult call_module_reload_hook(int moduleRef, std::size_t moduleSlot,
+                                         runtime::Entity entity,
                                          int savedStateRef) noexcept {
   if ((g_state == nullptr) || (moduleRef == LUA_NOREF)) {
     return ReloadHookResult::Failed;
@@ -749,23 +920,26 @@ ReloadHookResult call_module_reload_hook(int moduleRef, runtime::Entity entity,
 
   ModuleCallArgs args{};
   args.moduleRef = moduleRef;
+  args.moduleSlot = moduleSlot;
   args.entity = entity;
   args.savedStateRef = savedStateRef;
-  if (!protected_engine_dispatch(g_state, &module_reload_trampoline, &args, 0,
-                                 "on_reload")) {
-    mark_entity_faulted(entity);
+  if (!protected_hook_dispatch(&module_reload_trampoline, &args, 0,
+                               "on_reload")) {
+    mark_behaviour_faulted(entity, moduleSlot);
     return ReloadHookResult::Failed;
   }
   return args.called ? ReloadHookResult::Succeeded : ReloadHookResult::Missing;
 }
 
-/// Delivers pending module reloads before any new-module tick callback.
-/// Each module's delivery walk runs over a pre-walk snapshot with
-/// per-entity revalidation (alive + path match against a local copy) so a
-/// reload hook that destroys or creates scripted entities mid-walk still
-/// delivers to every surviving pre-walk entity exactly once; entities
-/// created during the walk are excluded by the snapshot. The walk cannot
-/// nest with itself (only C callers reach it), so one buffer suffices.
+/// Delivers pending module reloads before any new-module tick callback, to
+/// every live behaviour (enabled, or begun) that runs a reloaded module.
+/// Each
+/// module's delivery walk runs over a pre-walk snapshot with per-entity
+/// revalidation (alive + the module still listed) so a reload hook that
+/// destroys or creates scripted entities mid-walk still delivers to every
+/// surviving pre-walk behaviour exactly once; entities created during the
+/// walk are excluded by the snapshot. The walk cannot nest with itself
+/// (only C callers reach it), so one buffer suffices.
 void dispatch_pending_entity_reloads() noexcept {
   if (!g_hasPendingEntityReloads || (g_state == nullptr) || !runtime_bound()) {
     return;
@@ -785,62 +959,147 @@ void dispatch_pending_entity_reloads() noexcept {
     const std::size_t count = snapshot_scripted_entities(g_reloadDispatchOrder);
     for (std::size_t j = 0U; j < count; ++j) {
       const core::Entity entity = g_reloadDispatchOrder[j];
-      char path[kScriptPathSize] = {};
+      BehaviourSnapshot list{};
       if (!world_entity_alive(world, entity) ||
-          !copy_entity_script_path(world, entity, path) ||
-          (std::strcmp(path, modPath) != 0)) {
+          !snapshot_entity_behaviours(world, entity, &list) ||
+          !behaviour_is_live(entity, i, modPath, list)) {
+        continue;
+      }
+      BehaviourState *state = claim_behaviour_state(entity, i, list);
+      if (state == nullptr) {
         continue;
       }
 
-      EntitySavedState *savedState = nullptr;
-      int savedStateRef = LUA_NOREF;
-      if ((entity.index > 0U) && (entity.index < kMaxFaultedEntities)) {
-        EntitySavedState &candidate = g_entitySavedState[entity.index];
-        if (candidate.moduleSlot == i) {
-          savedState = &candidate;
-          if (candidate.owner == entity) {
-            savedStateRef = candidate.registryRef;
-          }
-        }
-      }
-
-      clear_entity_fault(entity);
+      // The new code gets a clean slate: a fault the old code raised no
+      // longer stops this behaviour.
+      state->flags = static_cast<std::uint8_t>(state->flags &
+                                               ~kBehaviourFaulted);
+      const int savedStateRef = state->savedStateRef;
       const ReloadHookResult result =
-          call_module_reload_hook(module.registryRef, entity, savedStateRef);
+          call_module_reload_hook(module.registryRef, i, entity, savedStateRef);
       if (result == ReloadHookResult::Missing) {
-        static_cast<void>(call_module_function(module.registryRef,
+        // Without on_reload the new code starts over from on_begin_play,
+        // which also counts as this behaviour beginning.
+        if (BehaviourState *restarted = find_behaviour_state(entity, i)) {
+          restarted->flags |= kBehaviourBegun;
+        }
+        static_cast<void>(call_module_function(module.registryRef, i,
                                                "on_begin_play", "on_start",
                                                entity, false, 0.0F));
       }
-
-      if (savedState != nullptr) {
-        release_entity_saved_state(*savedState);
+      if (BehaviourState *after = find_behaviour_state(entity, i)) {
+        release_saved_state(*after);
       }
     }
 
-    clear_entity_saved_state_for_module(i);
+    clear_saved_states_for_module(i);
     module.reloaded = false;
   }
 }
 
-/// Fires on_end_play for one entity when it has a script and began play.
+/// Loads `path` and reports its module slot; LUA_NOREF when it does not
+/// load.
+int load_behaviour_module(const char *path, std::size_t *outSlot) noexcept {
+  const int ref = get_or_load_entity_script_module(path);
+  *outSlot = (ref == LUA_NOREF) ? kInvalidModuleSlot : find_module_slot(path);
+  return (*outSlot == kInvalidModuleSlot) ? LUA_NOREF : ref;
+}
+
+/// Calls on_end_play on each behaviour of `entity` that began play, in list
+/// order: the hooks pair or neither fires. A behaviour disabled after it
+/// began still ends.
+void end_entity_behaviours(runtime::World *world,
+                           runtime::Entity entity) noexcept {
+  BehaviourSnapshot list{};
+  if (!snapshot_entity_behaviours(world, entity, &list)) {
+    return;
+  }
+  for (std::size_t b = 0U; b < list.count; ++b) {
+    if (!world_entity_alive(world, entity)) {
+      return;
+    }
+    const std::size_t slot = find_module_slot(list.paths[b]);
+    if ((slot == kInvalidModuleSlot) ||
+        !behaviour_has(entity, slot, kBehaviourBegun) ||
+        behaviour_has(entity, slot, kBehaviourFaulted)) {
+      continue;
+    }
+    arm_debug_lua_hook(g_state);
+    std::size_t loadedSlot = kInvalidModuleSlot;
+    const int ref = load_behaviour_module(list.paths[b], &loadedSlot);
+    if (ref == LUA_NOREF) {
+      continue;
+    }
+    static_cast<void>(call_module_function(ref, loadedSlot, "on_end_play",
+                                           "on_end", entity, false, 0.0F));
+  }
+}
+
+/// Calls on_begin_play on one behaviour, marking it begun first so a hook
+/// that re-enters dispatch does not begin it twice.
+void begin_behaviour(int ref, std::size_t moduleSlot, runtime::Entity entity,
+                     const BehaviourSnapshot &list) noexcept {
+  BehaviourState *state = claim_behaviour_state(entity, moduleSlot, list);
+  if (state == nullptr) {
+    return;
+  }
+  state->flags |= kBehaviourBegun;
+  call_module_function(ref, moduleSlot, "on_begin_play", "on_start", entity,
+                       false, 0.0F);
+}
+
+/// Begins play for every enabled behaviour of `entity` that has not begun
+/// and has not faulted. Returns true when none is left waiting: each one
+/// began, or its module failed to load (false then, so the entity stays
+/// pending and its begin-play retries the module next frame).
+bool begin_entity_behaviours(runtime::World *world,
+                             runtime::Entity entity) noexcept {
+  BehaviourSnapshot list{};
+  if (!snapshot_entity_behaviours(world, entity, &list)) {
+    return true;
+  }
+  int refs[kMaxBehaviours] = {};
+  std::size_t slots[kMaxBehaviours] = {};
+  bool allLoaded = true;
+  for (std::size_t b = 0U; b < list.count; ++b) {
+    refs[b] = LUA_NOREF;
+    slots[b] = kInvalidModuleSlot;
+    if (!list.enabled[b]) {
+      continue;
+    }
+    const std::size_t known = find_module_slot(list.paths[b]);
+    if ((known != kInvalidModuleSlot) &&
+        (behaviour_has(entity, known, kBehaviourBegun) ||
+         behaviour_has(entity, known, kBehaviourFaulted))) {
+      continue;
+    }
+    arm_debug_lua_hook(g_state);
+    refs[b] = load_behaviour_module(list.paths[b], &slots[b]);
+    allLoaded = allLoaded && (refs[b] != LUA_NOREF);
+  }
+  if (allLoaded) {
+    runtime_binding().services->mark_begin_play_done(world, entity);
+  }
+  for (std::size_t b = 0U; b < list.count; ++b) {
+    if ((refs[b] == LUA_NOREF) || !world_entity_alive(world, entity)) {
+      continue;
+    }
+    // An earlier behaviour's hook may have hot-reloaded this module, which
+    // releases the reference loaded above; a loaded module keeps its slot.
+    begin_behaviour(g_entityScriptModules[slots[b]].registryRef, slots[b],
+                    entity, list);
+  }
+  return allLoaded;
+}
+
+/// Fires on_end_play for one entity's behaviours that began play.
 void dispatch_entity_end_play(runtime::World *world,
                               runtime::Entity entity) noexcept {
-  if (!runtime_bound() ||
-      !runtime_binding().services->has_begun_play(world, entity)) {
-    return;
-  }
-  char path[kScriptPathSize] = {};
-  if (!copy_entity_script_path(world, entity, path)) {
-    return;
-  }
-  const int ref = get_or_load_entity_script_module(path);
-  if (ref == LUA_NOREF) {
+  if (!runtime_bound()) {
     return;
   }
   ++g_endPlayDispatchDepth;
-  static_cast<void>(
-      call_module_function(ref, "on_end_play", "on_end", entity, false, 0.0F));
+  end_entity_behaviours(world, entity);
   --g_endPlayDispatchDepth;
 }
 
@@ -855,15 +1114,35 @@ struct BeginPlaySnapshot final {
   std::size_t count = 0U;
 };
 
-/// Bridge visitor: settles an entity with nothing to call (no script, or a
-/// faulted one) on the spot, and records a scripted entity this dispatch
-/// has not attempted yet. Nothing here calls Lua, so the walk sees no
-/// creation or destruction.
+/// True when some enabled behaviour of `entity` has neither begun nor
+/// faulted, so its begin-play has a hook to call. Calls no Lua.
+bool has_behaviour_to_begin(runtime::World *world,
+                            runtime::Entity entity) noexcept {
+  BehaviourSnapshot list{};
+  if (!snapshot_entity_behaviours(world, entity, &list)) {
+    return false;
+  }
+  for (std::size_t b = 0U; b < list.count; ++b) {
+    if (!list.enabled[b]) {
+      continue;
+    }
+    const std::size_t slot = find_module_slot(list.paths[b]);
+    if ((slot == kInvalidModuleSlot) ||
+        (!behaviour_has(entity, slot, kBehaviourBegun) &&
+         !behaviour_has(entity, slot, kBehaviourFaulted))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Bridge visitor: settles an entity with nothing to call (no behaviour, or
+/// only disabled, begun or faulted ones) on the spot, and records one this
+/// dispatch has not attempted yet. Nothing here calls Lua, so the walk sees
+/// no creation or destruction.
 void begin_play_snapshot_visit(core::Entity entity, void *context) noexcept {
   auto *snapshot = static_cast<BeginPlaySnapshot *>(context);
-  char path[kScriptPathSize] = {};
-  if (!copy_entity_script_path(snapshot->world, entity, path) ||
-      entity_is_faulted(entity)) {
+  if (!has_behaviour_to_begin(snapshot->world, entity)) {
     runtime_binding().services->mark_begin_play_done(snapshot->world, entity);
     return;
   }
@@ -880,21 +1159,11 @@ void begin_play_snapshot_visit(core::Entity entity, void *context) noexcept {
 /// Begins play for one snapshotted entity that still needs it. A module
 /// that fails to load leaves the entity pending.
 void begin_play_entity(runtime::World *world, core::Entity entity) noexcept {
-  const RuntimeServices &services = *runtime_binding().services;
-  char path[kScriptPathSize] = {};
   if (!world_entity_alive(world, entity) ||
-      services.has_begun_play(world, entity) ||
-      !copy_entity_script_path(world, entity, path) ||
-      entity_is_faulted(entity)) {
+      runtime_binding().services->has_begun_play(world, entity)) {
     return;
   }
-  arm_debug_lua_hook(g_state);
-  const int ref = get_or_load_entity_script_module(path);
-  if (ref == LUA_NOREF) {
-    return;
-  }
-  services.mark_begin_play_done(world, entity);
-  call_module_function(ref, "on_begin_play", "on_start", entity, false, 0.0F);
+  static_cast<void>(begin_entity_behaviours(world, entity));
 }
 
 } // namespace
@@ -922,6 +1191,13 @@ bool push_entity_script_module(lua_State *state, const char *path) noexcept {
   return true;
 }
 
+const char *running_hook_script(core::Entity entity) noexcept {
+  if ((g_hookEntity != entity) || (g_hookModuleSlot >= g_entityScriptModuleCount)) {
+    return nullptr;
+  }
+  return g_entityScriptModules[g_hookModuleSlot].path;
+}
+
 int lua_engine_require(lua_State *state) noexcept {
   const char *path = lua_tostring(state, 1);
   if ((path == nullptr) || (path[0] == '\0')) {
@@ -947,19 +1223,9 @@ void dispatch_entity_scripts_start() noexcept {
   const std::size_t count = snapshot_script_dispatch_order();
   for (std::size_t i = 0U; i < count; ++i) {
     const runtime::Entity entity = g_scriptDispatchOrder[i];
-    char path[kScriptPathSize] = {};
-    if (!world_entity_alive(world, entity) ||
-        !copy_entity_script_path(world, entity, path) ||
-        entity_is_faulted(entity)) {
-      continue;
+    if (world_entity_alive(world, entity)) {
+      static_cast<void>(begin_entity_behaviours(world, entity));
     }
-    arm_debug_lua_hook(g_state);
-    const int ref = get_or_load_entity_script_module(path);
-    if (ref == LUA_NOREF) {
-      continue;
-    }
-    runtime_binding().services->mark_begin_play_done(world, entity);
-    call_module_function(ref, "on_begin_play", "on_start", entity, false, 0.0F);
   }
 }
 
@@ -1020,8 +1286,11 @@ namespace {
 
 /// Shared body of the per-frame and per-step dispatches: calls `funcName`
 /// (or `fallbackName`, when given and the module lacks the first) with
-/// the entity and `dt` for every alive, unfaulted scripted entity, in
-/// snapshotted ScriptComponent dispatch order.
+/// the entity and `dt` on every enabled, unfaulted behaviour of every
+/// alive scripted entity, entities in snapshotted dispatch order and each
+/// entity's behaviours in list order. A behaviour of an entity that has
+/// begun play but has not begun itself -- enabled or added since -- begins
+/// first, as Unity calls Start before a component's first Update.
 void dispatch_entity_scripts_tick(const char *funcName,
                                   const char *fallbackName, float dt) noexcept {
   ENGINE_ASSERT_MAIN_THREAD();
@@ -1036,21 +1305,37 @@ void dispatch_entity_scripts_tick(const char *funcName,
   const std::size_t count = snapshot_script_dispatch_order();
   for (std::size_t i = 0U; i < count; ++i) {
     const runtime::Entity entity = g_scriptDispatchOrder[i];
-    char path[kScriptPathSize] = {};
+    BehaviourSnapshot list{};
     if (!world_entity_alive(world, entity) ||
-        !copy_entity_script_path(world, entity, path)) {
+        !snapshot_entity_behaviours(world, entity, &list)) {
       continue;
     }
-    arm_debug_lua_hook(g_state);
-    const int ref = get_or_load_entity_script_module(path);
-    if (ref == LUA_NOREF) {
-      continue;
+    for (std::size_t b = 0U; b < list.count; ++b) {
+      if (!list.enabled[b]) {
+        continue;
+      }
+      arm_debug_lua_hook(g_state);
+      std::size_t slot = kInvalidModuleSlot;
+      if (load_behaviour_module(list.paths[b], &slot) == LUA_NOREF) {
+        continue;
+      }
+      dispatch_pending_entity_reloads();
+      if (!world_entity_alive(world, entity) ||
+          behaviour_has(entity, slot, kBehaviourFaulted)) {
+        continue;
+      }
+      if (!behaviour_has(entity, slot, kBehaviourBegun) &&
+          runtime_binding().services->has_begun_play(world, entity)) {
+        begin_behaviour(g_entityScriptModules[slot].registryRef, slot, entity,
+                        list);
+        if (!world_entity_alive(world, entity) ||
+            behaviour_has(entity, slot, kBehaviourFaulted)) {
+          continue;
+        }
+      }
+      call_module_function(g_entityScriptModules[slot].registryRef, slot,
+                           funcName, fallbackName, entity, true, dt);
     }
-    dispatch_pending_entity_reloads();
-    if (!world_entity_alive(world, entity) || entity_is_faulted(entity)) {
-      continue;
-    }
-    call_module_function(ref, funcName, fallbackName, entity, true, dt);
   }
 }
 
@@ -1068,29 +1353,19 @@ void dispatch_entity_scripts_fixed_update(float dt) noexcept {
 namespace {
 
 /// Shared body of dispatch_entity_scripts_end() and
-/// dispatch_entity_scripts_end_for_transition(): calls module.on_end_play
-/// for every alive, currently-scripted entity in the bound world, in
-/// snapshotted ScriptComponent dispatch order.
+/// dispatch_entity_scripts_end_for_transition(): calls on_end_play on every
+/// behaviour that began play, on every alive scripted entity in the bound
+/// world, in snapshotted dispatch order. A behaviour that never began
+/// (spawned in the final tick, begin-play still pending, or disabled
+/// throughout) gets no on_end_play either, like the destroy path: the
+/// hooks pair or neither fires.
 void dispatch_entity_scripts_end_impl(runtime::World *world) noexcept {
   const std::size_t count = snapshot_script_dispatch_order();
   for (std::size_t i = 0U; i < count; ++i) {
     const runtime::Entity entity = g_scriptDispatchOrder[i];
-    char path[kScriptPathSize] = {};
-    // An entity that never received on_begin_play (spawned in the final
-    // tick, begin-play still pending) gets no on_end_play either, like
-    // the destroy path: the hooks pair or neither fires.
-    if (!world_entity_alive(world, entity) ||
-        !runtime_binding().services->has_begun_play(world, entity) ||
-        !copy_entity_script_path(world, entity, path)) {
-      continue;
+    if (world_entity_alive(world, entity)) {
+      end_entity_behaviours(world, entity);
     }
-    arm_debug_lua_hook(g_state);
-    const int ref = get_or_load_entity_script_module(path);
-    if (ref == LUA_NOREF) {
-      continue;
-    }
-    static_cast<void>(call_module_function(ref, "on_end_play", "on_end", entity,
-                                           false, 0.0F));
   }
 }
 
@@ -1128,12 +1403,9 @@ void dispatch_entity_scripts_end_for_transition() noexcept {
 
 void clear_entity_script_modules() noexcept {
   clear_lock_rotation_captures();
-  clear_entity_saved_state();
+  clear_behaviour_states();
   g_reportedRefusalCount = 0U;
   g_hasPendingEntityReloads = false;
-  for (core::Entity &faultedEntity : g_entityFaulted) {
-    faultedEntity = core::kInvalidEntity;
-  }
   if (g_state != nullptr) {
     for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
       if (g_entityScriptModules[i].registryRef != LUA_NOREF) {

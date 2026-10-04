@@ -930,7 +930,7 @@ int main() {
   }
 
   engine::runtime::ScriptComponent scriptComp{};
-  std::snprintf(scriptComp.scriptPath, sizeof(scriptComp.scriptPath), "%s",
+  std::snprintf(scriptComp.behaviours[0].scriptPath, sizeof(scriptComp.behaviours[0].scriptPath), "%s",
                 kPrefabScriptPath);
   if (!world->add_script_component(src, scriptComp)) {
     return 32;
@@ -1065,7 +1065,7 @@ int main() {
     remove_prefab_file();
     return 42;
   }
-  if (std::strcmp(instScript.scriptPath, kPrefabScriptPath) != 0) {
+  if (std::strcmp(instScript.behaviours[0].scriptPath, kPrefabScriptPath) != 0) {
     remove_prefab_file();
     return 43;
   }

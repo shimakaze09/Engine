@@ -173,7 +173,7 @@ int main() {
   const engine::runtime::Entity scripted = g_world->create_scene_object();
   CHECK(scripted != engine::runtime::kInvalidEntity, "spawn scripted");
   engine::runtime::ScriptComponent sc{};
-  std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kScriptPath);
+  std::snprintf(sc.behaviours[0].scriptPath, sizeof(sc.behaviours[0].scriptPath), "%s", kScriptPath);
   CHECK(g_world->add_script_component(scripted, sc), "attach script");
   CHECK(ticking_frame(pipeline), "script frame 1");
   CHECK(ticking_frame(pipeline), "script frame 2");
@@ -188,7 +188,7 @@ int main() {
   const engine::runtime::Entity orphan = g_world->create_scene_object();
   CHECK(orphan != engine::runtime::kInvalidEntity, "spawn orphan");
   engine::runtime::ScriptComponent orphanScript{};
-  std::snprintf(orphanScript.scriptPath, sizeof(orphanScript.scriptPath),
+  std::snprintf(orphanScript.behaviours[0].scriptPath, sizeof(orphanScript.behaviours[0].scriptPath),
                 "%s", kOrphanScriptPath);
   CHECK(g_world->add_script_component(orphan, orphanScript),
         "attach orphan script");

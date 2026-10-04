@@ -277,7 +277,7 @@ engine::runtime::Entity spawn_scripted_entity() noexcept {
     return engine::runtime::kInvalidEntity;
   }
   engine::runtime::ScriptComponent sc{};
-  std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kScriptPath);
+  std::snprintf(sc.behaviours[0].scriptPath, sizeof(sc.behaviours[0].scriptPath), "%s", kScriptPath);
   if (!g_world->add_script_component(entity, sc)) {
     return engine::runtime::kInvalidEntity;
   }

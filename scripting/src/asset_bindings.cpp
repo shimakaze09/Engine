@@ -150,15 +150,16 @@ int lua_engine_add_script_component(lua_State *state) noexcept {
     return 1;
   }
 
-  runtime::ScriptComponent comp{};
-  if (!copy_path_strict(comp.scriptPath, sizeof(comp.scriptPath), path,
+  char scriptPath[math::ScriptBehaviour::kMaxPathLength + 1U] = {};
+  if (!copy_path_strict(scriptPath, sizeof(scriptPath), path,
                         "add_script_component") ||
-      !script_path_in_jail(comp.scriptPath, "add_script_component")) {
+      !script_path_in_jail(scriptPath, "add_script_component")) {
     lua_pushboolean(state, 0);
     return 1;
   }
 
-  lua_pushboolean(state, apply_or_queue_script_component(entity, comp) ? 1 : 0);
+  lua_pushboolean(state,
+                  apply_or_queue_script_component(entity, scriptPath) ? 1 : 0);
   return 1;
 }
 
