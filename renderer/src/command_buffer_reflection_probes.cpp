@@ -447,7 +447,10 @@ void bake_pending_reflection_probe(const OffscreenSceneInputs &inputs,
   RendererContext &context = renderer_context();
   if ((inputs.backend == nullptr) || (inputs.dev == nullptr) ||
       (inputs.dev->create_render_target == nullptr) ||
-      (inputs.dev->create_texture == nullptr)) {
+      (inputs.dev->create_texture == nullptr) ||
+      // A capture is rendered once and kept, so none is taken on a frame a
+      // swapchain reset applies to; the probe stays pending until the next.
+      device_frame_applies_reset(inputs.dev)) {
     return;
   }
   const SkyModel skyModel = selected_sky_model();

@@ -2,8 +2,9 @@
 // M-05): every ensure_* bake restores the device to the ambient scene
 // state (back buffer bound, opaque-scene render state), a failed
 // per-face render-target creation aborts the bake, destroys the staged
-// cubemap, and leaves no cached success state, and successful bakes
-// destroy every transient face target they created.
+// cubemap, and leaves no cached success state, successful bakes destroy
+// every transient face target they created, and no bake starts on a frame
+// a swapchain reset applies to.
 
 #include "command_buffer_context.h"
 #include "command_buffer_ibl.h"
@@ -187,6 +188,44 @@ void test_brdf_lut_restores_state() noexcept {
   check_state_restored("brdf lut leaves the back buffer bound");
 }
 
+bool g_resetFrame = false;
+bool fake_frame_applies_reset() noexcept { return g_resetFrame; }
+
+/// EXPECTATION (#1212): no bake starts on a frame a swapchain reset applies
+/// to, since a bake is rendered once and kept: nothing is drawn or cached,
+/// and the next frame bakes. On base the bake ran and was kept.
+void test_no_bake_on_a_reset_frame() noexcept {
+  BackendState backend = make_bake_backend();
+  engine::tests::fake_device().frame_applies_reset = &fake_frame_applies_reset;
+  g_resetFrame = true;
+  CHECK((ensure_brdf_lut(backend, render_device(),
+                         ReflectionProbeBakeSettings{}) ==
+         kInvalidDeviceTexture) &&
+            (ensure_prefiltered_environment(
+                 backend, render_device(), backend.skyEnvironment,
+                 bake_source(3U),
+                 ReflectionProbeBakeSettings{}) == kInvalidDeviceTexture) &&
+            (ensure_irradiance_environment(
+                 backend, render_device(), backend.skyEnvironment,
+                 bake_source(3U),
+                 ReflectionProbeBakeSettings{}) == kInvalidDeviceTexture) &&
+            (engine::tests::fake_log().draws == 0),
+        "a reset frame bakes nothing");
+  g_resetFrame = false;
+  CHECK((ensure_brdf_lut(backend, render_device(),
+                         ReflectionProbeBakeSettings{}) !=
+         kInvalidDeviceTexture) &&
+            (ensure_prefiltered_environment(
+                 backend, render_device(), backend.skyEnvironment,
+                 bake_source(3U),
+                 ReflectionProbeBakeSettings{}) != kInvalidDeviceTexture) &&
+            (ensure_irradiance_environment(
+                 backend, render_device(), backend.skyEnvironment,
+                 bake_source(3U),
+                 ReflectionProbeBakeSettings{}) != kInvalidDeviceTexture),
+        "the next frame bakes all three");
+}
+
 /// A new environment whose device texture reuses the handle of the one it
 /// replaced (bgfx recycles destroyed handles) is baked again rather than
 /// served the old bake; the same environment again is served from the
@@ -245,6 +284,7 @@ int main() {
   test_irradiance_contracts();
   test_brdf_lut_restores_state();
   test_bake_cache_follows_the_environment();
+  test_no_bake_on_a_reset_frame();
   engine::core::shutdown_cvars();
 
   std::printf("\n%s (%d failure(s))\n",

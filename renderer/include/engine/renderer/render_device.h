@@ -535,7 +535,22 @@ struct RenderDevice final {
 
   // Dropped-operation diagnostics (stale handles, invalid descriptors).
   DeviceDebugStats (*debug_stats)() noexcept = nullptr;
+
+  // True while recording a frame whose submission applies a swapchain
+  // reset (a resize or a vsync change, issued between frames). What such a
+  // frame renders off screen has been seen not to land on Direct3D 12, so
+  // a pass that renders once and keeps its result redraws it on a later
+  // frame instead of keeping this one's.
+  bool (*frame_applies_reset)() noexcept = nullptr;
 };
+
+/// Whether the frame `dev` is recording is one a swapchain reset applies
+/// to; false for a null device or one that does not report it. Work that
+/// renders once and keeps its result waits for a later frame when true.
+inline bool device_frame_applies_reset(const RenderDevice *dev) noexcept {
+  return (dev != nullptr) && (dev->frame_applies_reset != nullptr) &&
+         dev->frame_applies_reset();
+}
 
 /// Initializes the owning system for render device.
 bool initialize_render_device() noexcept;

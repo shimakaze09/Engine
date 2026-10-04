@@ -186,6 +186,9 @@ struct BgfxDeviceContext final {
   std::int32_t backBufferWidth = 0;
   std::int32_t backBufferHeight = 0;
   bool backBufferVsync = false;
+  // Set when a reset is issued, after one frame's submit: the frame being
+  // recorded next is the one that reset applies to.
+  bool frameAppliesReset = false;
   // r_vsync is polled every present; the handle keeps that off the
   // by-name path.
   core::CVarRef vsyncCvar{"r_vsync"};

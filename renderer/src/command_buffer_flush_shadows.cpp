@@ -154,22 +154,19 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
       }
 
       gpu_profiler_end_pass(GpuPassId::ShadowMap);
-      // Kept only from a second consecutive render under this key that the
-      // device dropped nothing from: a first render into the atlas has
-      // been seen not to land on Direct3D 12, and the device gives
-      // no completion to check it by.
-      const bool landed = dropped_device_operations(dev) == droppedBefore;
-      RenderViewResources &view = backend.view();
-      view.directionalShadowCacheValid =
-          landed && (view.directionalShadowLandedKey == cacheKey);
-      view.directionalShadowLandedKey = landed ? cacheKey : 0U;
-      view.directionalShadowCacheKey = cacheKey;
+      // Kept unless the device dropped something from the pass or the
+      // frame is one a swapchain reset applies to, whose off-screen output
+      // has been seen not to land on Direct3D 12: such maps are drawn again
+      // next frame rather than kept for as long as the scene is still.
+      const bool landed = (dropped_device_operations(dev) == droppedBefore) &&
+                          !device_frame_applies_reset(dev);
+      backend.view().directionalShadowCacheKey = cacheKey;
+      backend.view().directionalShadowCacheValid = landed;
       backend.cascadeAtlasView = backend.currentView;
     }
   } else {
     backend.view().directionalShadowCacheKey = 0U;
     backend.view().directionalShadowCacheValid = false;
-    backend.view().directionalShadowLandedKey = 0U;
   }
 
   const bool doSpotShadows =

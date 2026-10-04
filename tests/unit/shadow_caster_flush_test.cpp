@@ -10,8 +10,8 @@
 // program with its mask, cutoff and UV transform bound, in the spot and the
 // point passes alike, and every other caster through the pass's own.
 // The directional cascades are cached, and reused only while the casters'
-// resolved geometry and masks are unchanged, and only from the second
-// consecutive render under a key that the device dropped nothing from.
+// resolved geometry and masks are unchanged, and never from a frame a
+// swapchain reset applies to or the device dropped an operation from.
 
 #include "command_buffer_context.h"
 #include "command_buffer_flush_internal.h"
@@ -99,6 +99,9 @@ DeviceDebugStats fake_debug_stats() noexcept {
   stats.droppedOperations = g_droppedOperations;
   return stats;
 }
+/// Whether the fake device reports the frame as one a reset applies to.
+bool g_resetFrame = false;
+bool fake_frame_applies_reset() noexcept { return g_resetFrame; }
 
 void fake_draw(DeviceGeometryHandle, PrimitiveTopology, std::int32_t,
                std::int32_t) noexcept {
@@ -636,41 +639,34 @@ void test_directional_cache_follows_what_casters_draw() noexcept {
     return g_log.bindCount == 0U;
   };
 
-  // The maps are kept from the second consecutive render under a key,
-  // never the first (#1212): a first render into the atlas has been seen
-  // not to land on Direct3D 12, and nothing reports a frame's completion.
-  // Before, the first render was reused at once, so a render that did not
-  // land stayed on screen for as long as the scene was still.
-  const auto settled = [&]() noexcept { return redrawn() && redrawn(); };
-
   g_meshResolves = false;
   g_texturesResolve = false;
   CHECK(redrawn(), "the first frame draws the cascades");
-  CHECK(redrawn(), "the second draws them again, under the same key");
-  CHECK(reused(), "an unchanged frame after that reuses them");
+  CHECK(reused(), "an unchanged frame reuses them");
 
   g_meshResolves = true;
   CHECK(redrawn(), "a mesh that now resolves to geometry redraws them");
   CHECK(g_log.drawsOnTargets == 2U * kShadowCascadeCount,
         "the redraw draws both casters into every cascade");
-  CHECK(redrawn() && reused(), "and they are reused from the second render");
+  CHECK(reused(), "and the frame after reuses them again");
 
   g_texturesResolve = true;
-  CHECK(settled(), "a mask texture that finished loading redraws them");
+  CHECK(redrawn(), "a mask texture that finished loading redraws them");
   CHECK(reused(), "and the frame after reuses them again");
 
   g_draws[1].material.alphaCutoff = 0.5F;
-  CHECK(settled(), "a changed cutoff redraws them");
+  CHECK(redrawn(), "a changed cutoff redraws them");
   CHECK(reused(), "and the frame after reuses them again");
 
   g_draws[1].material = Material{};
 }
 
-/// EXPECTATION (#1212): cascades the device dropped an operation from
-/// while drawing them are never kept, however often they are redrawn under
-/// the same key, and are kept again from the second clean render after.
-/// On base the first render was kept whatever the device did with it.
-void test_directional_cache_never_keeps_a_dropped_render() noexcept {
+/// EXPECTATION (#1212): cascades drawn on a frame a swapchain reset applies
+/// to, or on one the device dropped an operation from, are not kept: the
+/// next frame draws them again, and that render is kept. On base the maps
+/// were kept from whatever frame drew them, so a render that did not land
+/// on Direct3D 12 stayed on screen for as long as the scene was still.
+void test_directional_cache_keeps_only_landed_renders() noexcept {
   reset_backend();
   g_backend.shadowAvailable = true;
   SceneLightData lights{};
@@ -680,23 +676,25 @@ void test_directional_cache_never_keeps_a_dropped_render() noexcept {
   const auto flush = [&]() noexcept {
     reset_fake_device();
     engine::tests::fake_device().debug_stats = &fake_debug_stats;
+    engine::tests::fake_device().frame_applies_reset =
+        &fake_frame_applies_reset;
     FrameFlushContext ctx = make_context(lights);
     flush_shadow_passes(ctx);
     return g_log.clearsOnTargets == kShadowCascadeCount;
   };
 
-  g_dropDraws = true;
-  CHECK(flush() && flush() && flush(),
-        "a pass the device drops from is redrawn every frame");
-  g_dropDraws = false;
-  CHECK(flush(), "the first clean render is not kept");
-  CHECK(flush(), "the second clean render under the key is drawn");
-  CHECK(!flush() && (g_log.bindCount == 0U), "and then reused");
+  g_resetFrame = true;
+  CHECK(flush(), "a reset frame draws the cascades");
+  g_resetFrame = false;
+  CHECK(flush(), "the frame after draws them again rather than keep them");
+  CHECK(!flush() && (g_log.bindCount == 0U), "and that render is kept");
 
-  g_dropDraws = true;
   lights.directionalLights[0].intensity = 2.0F;
-  CHECK(flush() && flush(), "a new key whose render drops is redrawn");
+  g_dropDraws = true;
+  CHECK(flush() && flush(), "a pass the device drops from is drawn again");
   g_dropDraws = false;
+  CHECK(flush(), "the first clean render under the key is drawn");
+  CHECK(!flush() && (g_log.bindCount == 0U), "and kept at once");
   g_droppedOperations = 0U;
 }
 
@@ -758,7 +756,7 @@ int main() {
   test_unmasked_casters_keep_the_pass_program();
   test_skinned_masked_casters_pick_the_fitting_program();
   test_directional_cache_follows_what_casters_draw();
-  test_directional_cache_never_keeps_a_dropped_render();
+  test_directional_cache_keeps_only_landed_renders();
   test_cascades_render_into_their_own_tiles();
 
   if (g_failures != 0) {

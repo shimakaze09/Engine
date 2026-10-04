@@ -416,7 +416,6 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   for (RenderViewResources &view : backend->views) {
     view.directionalShadowCacheKey = 0U;
     view.directionalShadowCacheValid = false;
-    view.directionalShadowLandedKey = 0U;
   }
   backend->cascadeAtlasView = kMaxRenderViews;
   if (backend->shadowDepthShaderHandle != kInvalidShaderProgram) {
