@@ -32,6 +32,7 @@
 #include "reload_transaction.h"
 #include "runtime_binding.h"
 #include "scene_bindings.h"
+#include "script_property_bindings.h"
 #include "script_reload.h"
 #include "timer_bindings.h"
 #include "touch_bindings.h"
@@ -249,6 +250,8 @@ void register_engine_bindings(lua_State *state) noexcept {
 
   lua_pushcfunction(state, &lua_engine_require);
   lua_setfield(state, -2, "require");
+  lua_pushcfunction(state, &lua_engine_get_property);
+  lua_setfield(state, -2, "get_property");
 
   lua_pushcfunction(state, &lua_engine_persist);
   lua_setfield(state, -2, "persist");
@@ -541,6 +544,7 @@ void reset_run_state() noexcept {
   }
   reset_mesh_material_bindings();
   reset_entity_argument_reports();
+  reset_script_property_reports();
   clear_deferred_mutations();
   reset_scene_bindings();
   reset_entity_pool_bindings();

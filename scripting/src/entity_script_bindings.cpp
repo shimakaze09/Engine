@@ -910,6 +910,18 @@ void clear_entity_script_bindings() noexcept {
   g_callbacks = {};
 }
 
+bool push_entity_script_module(lua_State *state, const char *path) noexcept {
+  if ((state == nullptr) || (path == nullptr) || (path[0] == '\0')) {
+    return false;
+  }
+  const int ref = get_or_load_entity_script_module(path);
+  if (ref == LUA_NOREF) {
+    return false;
+  }
+  lua_rawgeti(state, LUA_REGISTRYINDEX, ref);
+  return true;
+}
+
 int lua_engine_require(lua_State *state) noexcept {
   const char *path = lua_tostring(state, 1);
   if ((path == nullptr) || (path[0] == '\0')) {

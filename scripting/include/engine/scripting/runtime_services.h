@@ -268,6 +268,10 @@ struct RuntimeServices final {
   bool (*get_tag_set_component_op)(
       runtime::World *world, core::Entity entity,
       math::TagSetComponent *outComponent) noexcept = nullptr;
+  /// The entity's script property overrides, or null when it has none or
+  /// the handle is stale; valid until the World is next mutated.
+  const math::ScriptPropertiesComponent *(*find_script_properties_op)(
+      runtime::World *world, core::Entity entity) noexcept = nullptr;
   bool (*get_character_controller_op)(
       runtime::World *world, core::Entity entity,
       math::CharacterControllerComponent *outComponent) noexcept = nullptr;
