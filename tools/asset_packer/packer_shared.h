@@ -111,21 +111,6 @@ std::uint64_t cook_settings_key(std::uint64_t importSettingsHash,
                                 const char *logicRevision);
 /// Sorts digests by path for deterministic stamp layout.
 void sort_dependency_digests(std::vector<DependencyDigest> &digests);
-/// Reads the import settings that apply to the SOURCE: its ".meta"
-/// sidecar's block, else the mesh block of the nearest enclosing folder's
-/// sidecar inside the project. They are authored data, never derived: the
-/// cook reads them and never writes them, so deleting every cooked output
-/// loses nothing a human typed. Leaves `*outSettings` at the defaults when
-/// no sidecar on the way sets them, and returns Ok. Malformed means a
-/// sidecar on the way will not read, so settings may have been authored
-/// and are unknown, which a cook must refuse rather than cook at the
-/// defaults.
-/// `unreadable`, when given, receives the asset or folder whose ".meta"
-/// would not read.
-engine::content::SidecarReadResult
-read_authored_import_settings(const char *sourcePath,
-                              ImportSettings *outSettings,
-                              std::string *unreadable = nullptr);
 /// Writes the cook stamp recording source/settings hashes, dependency
 /// digests, and the output manifest hashed from the committed files;
 /// an unreadable listed output fails the write so the stamp can never

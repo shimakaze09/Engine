@@ -3,6 +3,10 @@
 engine_add_executable_target(asset_packer
     SOURCES
     main.cpp
+    importer.cpp
+    importer.h
+    gltf_importer.cpp
+    stb_impl.cpp
     cook_stamp.cpp
     generated_manifest.cpp
     init_meta.cpp

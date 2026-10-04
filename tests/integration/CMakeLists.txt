@@ -1400,6 +1400,19 @@ if(ENGINE_BUILD_TOOLS)
     )
 
     add_test(
+        NAME engine_integration_asset_packer_unclaimed_source
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.gltf"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/unclaimed_source_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_unclaimed_source_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_unclaimed_source
+        PROPERTIES LABELS integration
+    )
+
+    add_test(
         NAME engine_integration_asset_packer_rejects_graph_option
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"

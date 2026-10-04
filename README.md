@@ -723,6 +723,12 @@ build\tools\asset_packer\asset_packer.exe <input.gltf|input.glb> <output.mesh>
 
 Tool behavior:
 
+- Cooks a source through the importer that claims its asset type
+  (`tools/asset_packer/importer.h`): glTF to mesh, and a texture's
+  browser thumbnail. A source of a type no importer cooks is refused by
+  name (`engine_integration_asset_packer_unclaimed_source`). Each importer
+  names the import settings that change its cooked bytes and a logic
+  revision; both enter the cook key, so changing either recooks
 - Deterministic cook: identical inputs produce byte-identical outputs
 - Imports one primitive of one glTF mesh per `.mesh` (chosen by
   `importSettings.meshIndex` and `primitiveIndex` in the source's `.meta`,
