@@ -739,11 +739,7 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
   }
   if (record.renderTarget) {
     flags |= BGFX_TEXTURE_RT;
-    // Only a texture copy_depth writes into is a copy destination:
-    // on D3D12 one starts in the copy state, and every other render target
-    // starts ready to be drawn into.
-    record.blitDestination = desc.blitDestination;
-    if (desc.blitDestination) {
+    if (desc.format == TextureFormat::Depth24) {
       flags |= BGFX_TEXTURE_BLIT_DST;
     }
   }
@@ -1361,11 +1357,6 @@ void bgfx_copy_depth(RenderTargetHandle source, RenderTargetHandle destination,
   BgfxTextureRecord *dstTexture = ctx.textures.resolve(dst->depthTexture);
   if ((srcTexture == nullptr) || (dstTexture == nullptr)) {
     drop_operation("copy_depth: stale depth texture");
-    return;
-  }
-  if (!dstTexture->blitDestination) {
-    drop_operation("copy_depth: the destination depth texture was not "
-                   "created as a blit destination");
     return;
   }
   bgfx::blit(ctx.currentView, dstTexture->handle, 0U, 0U, srcTexture->handle,

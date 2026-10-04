@@ -81,7 +81,6 @@ struct BgfxTextureRecord final {
   std::int32_t mipLevels = 1;
   bool renderTarget = false;
   bool immutable = false; // created with pixels: bgfx rejects updates
-  bool blitDestination = false; // copy_depth may write into it
 };
 
 /// Geometry: referenced engine buffer handles, resolved per draw for
