@@ -84,6 +84,27 @@ struct TextureImportSettings final {
                                    const TextureImportSettings &) = default;
 };
 
+/// How a sound source is decoded when it loads: authored in its ".meta"
+/// sidecar, edited in the Inspector, as Unity's AudioImporter Sample Rate
+/// Setting and Force To Mono. The defaults are what every sound got before
+/// it had settings: the file's own rate, and its own channels (down to
+/// stereo).
+struct AudioImportSettings final {
+  /// The rate the sound is resampled to as it decodes, in Hz; 0 keeps the
+  /// file's. A lower rate halves the memory a long sound holds.
+  std::uint32_t sampleRate = 0U;
+  /// Decodes the sound to one channel, so a stereo file spatializes as a
+  /// point and takes half the memory.
+  bool forceMono = false;
+
+  friend constexpr bool operator==(const AudioImportSettings &,
+                                   const AudioImportSettings &) = default;
+};
+
+/// The lowest and highest rate a sound's settings may ask for, in Hz.
+inline constexpr std::uint32_t kMinAudioImportSampleRate = 8000U;
+inline constexpr std::uint32_t kMaxAudioImportSampleRate = 192000U;
+
 /// Stores asset metadata used by the engine.
 struct AssetMetadata final {
   static constexpr std::size_t kMaxTags = 16U;

@@ -257,6 +257,8 @@ SidecarReadResult parse_sidecar(const char *path, ImportSettingsKind kind,
   bool hasMeshImport = false;
   TextureImportSettings textureImport{};
   bool hasTextureImport = false;
+  AudioImportSettings audioImport{};
+  bool hasAudioImport = false;
   const core::JsonValue *settings =
       parser.get_object_field(*root, "importSettings");
   if (settings != nullptr) {
@@ -271,6 +273,7 @@ SidecarReadResult parse_sidecar(const char *path, ImportSettingsKind kind,
     const std::uint32_t newestVersion =
         (kind == ImportSettingsKind::Mesh)      ? kMeshImportSettingsVersion
         : (kind == ImportSettingsKind::Texture) ? kTextureImportSettingsVersion
+        : (kind == ImportSettingsKind::Audio)   ? kAudioImportSettingsVersion
                                                 : 0U;
     if (!read_int_field(parser, settingsValue, "version", &blockVersion) ||
         (blockVersion < 1)) {
@@ -308,6 +311,23 @@ SidecarReadResult parse_sidecar(const char *path, ImportSettingsKind kind,
                              &textureImport.wrap);
       hasTextureImport = true;
       break;
+    case ImportSettingsKind::Audio: {
+      std::int32_t sampleRate = 0;
+      read = read_int_field(parser, settingsValue, "sampleRate", &sampleRate) &&
+             read_bool_field(parser, settingsValue, "forceMono",
+                             &audioImport.forceMono) &&
+             // 0 keeps the file's rate; anything else is a rate a sound
+             // can be resampled to.
+             ((sampleRate == 0) ||
+              ((sampleRate >=
+                static_cast<std::int32_t>(kMinAudioImportSampleRate)) &&
+               (sampleRate <=
+                static_cast<std::int32_t>(kMaxAudioImportSampleRate))));
+      audioImport.sampleRate =
+          static_cast<std::uint32_t>((sampleRate > 0) ? sampleRate : 0);
+      hasAudioImport = true;
+      break;
+    }
     }
     if (static_cast<std::uint32_t>(blockVersion) > newestVersion) {
       char problem[160] = {};
@@ -362,6 +382,8 @@ SidecarReadResult parse_sidecar(const char *path, ImportSettingsKind kind,
   out->meshImport = meshImport;
   out->hasTextureImport = hasTextureImport;
   out->textureImport = textureImport;
+  out->hasAudioImport = hasAudioImport;
+  out->audioImport = audioImport;
   out->labels = labels;
   return SidecarReadResult::Ok;
 }
@@ -458,7 +480,8 @@ bool write_asset_sidecar(const char *assetOsPath,
   }
   const ImportSettingsKind kind = settings_kind_of(assetOsPath);
   if ((sidecar.hasMeshImport && (kind != ImportSettingsKind::Mesh)) ||
-      (sidecar.hasTextureImport && (kind != ImportSettingsKind::Texture))) {
+      (sidecar.hasTextureImport && (kind != ImportSettingsKind::Texture)) ||
+      (sidecar.hasAudioImport && (kind != ImportSettingsKind::Audio))) {
     log_sidecar_problem(path, "was not written: it carries import settings "
                               "for another type of asset");
     return false;
@@ -491,6 +514,14 @@ bool write_asset_sidecar(const char *assetOsPath,
            texture.generateMips ? "true" : "false",
            kFilterNames[static_cast<std::size_t>(texture.filter)],
            kWrapNames[static_cast<std::size_t>(texture.wrap)]);
+  }
+  if (sidecar.hasAudioImport) {
+    append(",\n  \"importSettings\": {"
+           "\n    \"sampleRate\": %u,"
+           "\n    \"forceMono\": %s"
+           "\n  }",
+           static_cast<unsigned>(sidecar.audioImport.sampleRate),
+           sidecar.audioImport.forceMono ? "true" : "false");
   }
   if (sidecar.labels.count > 0U) {
     // One label per line, so labels two branches added both survive a merge.

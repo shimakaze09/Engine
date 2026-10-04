@@ -55,6 +55,10 @@ struct AssetSidecar final {
   /// written.
   bool hasTextureImport = false;
   TextureImportSettings textureImport{};
+  /// How this source decodes, when it is a sound source; absent for one
+  /// with no settings of its own, which decodes at the defaults.
+  bool hasAudioImport = false;
+  AudioImportSettings audioImport{};
   /// The author's labels, as Unity's Asset Labels: searchable in the
   /// editor and loaded into the catalog as tags. Written only when there
   /// are any, so an unlabelled sidecar is byte for byte what it was.

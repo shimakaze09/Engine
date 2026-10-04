@@ -22,6 +22,8 @@ enum class ImportSettingsKind : std::uint8_t {
   Mesh,
   /// TextureImportSettings: applied by the texture loader.
   Texture,
+  /// AudioImportSettings: applied by the sound decoder.
+  Audio,
 };
 
 /// The newest version of each kind's block this build reads. A block
@@ -30,6 +32,7 @@ enum class ImportSettingsKind : std::uint8_t {
 /// importer_version and Unity's per-importer serializedVersion do.
 inline constexpr std::uint32_t kMeshImportSettingsVersion = 1U;
 inline constexpr std::uint32_t kTextureImportSettingsVersion = 1U;
+inline constexpr std::uint32_t kAudioImportSettingsVersion = 1U;
 
 // Row order is ENGINE_ASSET_TYPE_TABLE's; the asserts below hold it there.
 #define ENGINE_ASSET_IMPORT_SETTINGS_TABLE(X)                                  \
@@ -40,7 +43,7 @@ inline constexpr std::uint32_t kTextureImportSettingsVersion = 1U;
   X(Scene, None)                                                               \
   X(Animation, None)                                                           \
   X(AnimationController, None)                                                 \
-  X(Audio, None)                                                               \
+  X(Audio, Audio)                                                              \
   X(Unknown, None)                                                             \
   X(Prefab, None)                                                              \
   X(Shader, None)                                                              \
