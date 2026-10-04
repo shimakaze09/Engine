@@ -1,5 +1,7 @@
-// Implements the editor's NavMeshSurface Bake: the bake over the editing
-// World, the .navmesh write, the asset identity and the reload request.
+// Implements the editor's NavMeshSurface Bake: the path a surface with
+// none is given, the shared bake-and-write (runtime's
+// write_nav_mesh_surface_file, which engine_validate --bake-navmesh runs
+// too) and the reload request.
 
 #include "editor_nav_mesh_bake.h"
 
@@ -7,13 +9,10 @@
 
 #include <cstdio>
 #include <cstring>
-#include <memory>
 
-#include "engine/content/asset_type_table.h"
 #include "engine/core/vfs.h"
 #include "engine/engine.h"
-#include "engine/runtime/editor_bridge.h"
-#include "engine/runtime/navigation_bake.h"
+#include "engine/runtime/nav_mesh_surface_file.h"
 #include "engine/runtime/scene_navigation.h"
 
 namespace engine::editor {
@@ -96,48 +95,36 @@ NavMeshBakeReport bake_nav_mesh_surface_file(const runtime::World &world,
                   "no free .navmesh name fits; type a path");
     return report;
   }
-  const content::AssetClassification kind =
-      content::classify_asset_path(path);
-  if ((kind.tag != content::AssetTypeTag::NavMesh) || !kind.source) {
+  const runtime::NavMeshWriteReport write =
+      runtime::write_nav_mesh_surface_file(world, entity, path);
+  switch (write.result) {
+  case runtime::NavMeshWriteResult::Written:
+    break;
+  case runtime::NavMeshWriteResult::BadPath:
     std::snprintf(report.message, sizeof(report.message),
                   "the path must end in .navmesh");
     return report;
-  }
-
-  navigation::NavMesh mesh{};
-  if (!runtime::bake_nav_mesh_surface(world, entity, &mesh)) {
+  case runtime::NavMeshWriteResult::BakeFailed:
     std::snprintf(report.message, sizeof(report.message),
                   "the bake failed; see the log");
     return report;
-  }
-  if (mesh.empty()) {
+  case runtime::NavMeshWriteResult::Empty:
     std::snprintf(report.message, sizeof(report.message),
                   "nothing walkable inside the volume; nothing was written");
     return report;
-  }
-  std::unique_ptr<std::uint8_t[]> bytes{};
-  std::size_t size = 0U;
-  if (!navigation::write_nav_mesh(mesh, &bytes, &size) ||
-      !core::vfs_write_binary(path, bytes.get(), size)) {
+  case runtime::NavMeshWriteResult::EncodeFailed:
+  case runtime::NavMeshWriteResult::WriteFailed:
     std::snprintf(report.message, sizeof(report.message),
                   "%s could not be written; the previous file is kept",
                   path);
     return report;
   }
-
-  // The file is an asset from now on: a sidecar gives it the identity the
-  // catalog lists it under. A rebake keeps the identity it already has.
-  char osPath[1024] = {};
-  const bool identified =
-      core::vfs_resolve_os_path(path, osPath, sizeof(osPath)) &&
-      (runtime::editor_establish_asset_identity(osPath) !=
-       runtime::EditorIdentityResult::WriteFailed);
   runtime::request_scene_navigation_reload();
   std::memcpy(pathBuffer, path, std::strlen(path) + 1U);
   report.written = true;
   std::snprintf(report.message, sizeof(report.message),
-                "baked %zu polygons into %s%s", mesh.rect_count(), path,
-                identified ? "" : " (its sidecar could not be written)");
+                "baked %zu polygons into %s%s", write.polygons, path,
+                write.identified ? "" : " (its sidecar could not be written)");
   return report;
 }
 

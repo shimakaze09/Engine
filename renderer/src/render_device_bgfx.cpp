@@ -1134,6 +1134,45 @@ void bgfx_draw_indexed_instanced(DeviceGeometryHandle geometry,
 
 // --- Render targets, state, views ---
 
+namespace {
+
+/// Gives a new target defined contents: every colour attachment cleared to
+/// transparent black and its depth to the far plane, over the whole
+/// target, in a view of its own ahead of any pass that binds it. A
+/// created target's memory holds nothing defined until it is written, and
+/// a pass that renders it a tile at a time (the shadow cascade atlas) only
+/// clears what it draws; on Direct3D 12 the cascade atlas's first render
+/// read a sunlit face as shadowed until the atlas was rendered again
+/// (engine_integration_shadow_cache_far_cascade_gpu on WARP), as a target
+/// whose first write is not a full clear may. Unreal's render targets
+/// clear on their first use for the same reason.
+void clear_new_render_target(bgfx::FrameBufferHandle frameBuffer,
+                             std::int32_t width, std::int32_t height,
+                             bool hasColor, bool hasDepth) noexcept {
+  BgfxDeviceContext &ctx = device_context();
+  if (ctx.viewsUsed >= 255U) {
+    drop_operation("create_render_target: no view left to clear it in");
+    return;
+  }
+  const std::uint16_t view = ctx.viewsUsed;
+  ++ctx.viewsUsed;
+  std::uint16_t flags = BGFX_CLEAR_NONE;
+  if (hasColor) {
+    flags = static_cast<std::uint16_t>(flags | BGFX_CLEAR_COLOR);
+  }
+  if (hasDepth) {
+    flags = static_cast<std::uint16_t>(flags | BGFX_CLEAR_DEPTH);
+  }
+  bgfx::setViewFrameBuffer(view, frameBuffer);
+  bgfx::setViewMode(view, bgfx::ViewMode::Sequential);
+  bgfx::setViewRect(view, 0U, 0U, static_cast<std::uint16_t>(width),
+                    static_cast<std::uint16_t>(height));
+  bgfx::setViewClear(view, flags, 0x00000000U, 1.0F, 0U);
+  bgfx::touch(view);
+}
+
+} // namespace
+
 RenderTargetHandle
 bgfx_create_render_target(const RenderTargetDesc &desc) noexcept {
   BgfxDeviceContext &ctx = device_context();
@@ -1237,6 +1276,8 @@ bgfx_create_render_target(const RenderTargetDesc &desc) noexcept {
     drop_operation("create_render_target: table full");
     return RenderTargetHandle{};
   }
+  clear_new_render_target(record.handle, targetWidth, targetHeight,
+                          desc.colorCount > 0U, record.depthTexture != 0U);
   return RenderTargetHandle{value};
 }
 

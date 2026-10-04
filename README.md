@@ -28,7 +28,7 @@ Each fact has one home. Nothing mirrors anything else.
 - Generated Lua binding pipeline for annotated scripting accessors
 - A sample game, `samples/island/`: a project of its own (`island.project` and its `assets/`)
 - Test suites (unit, integration, smoke, benchmark, CMake configure-rejection) wired into CTest
-- Asset tooling: `asset_packer` (mesh, skeleton and animation cook, shader cook, metadata init) and the `engine_validate` content checker (`--project <dir>` catalogues the project as the engine does, checks every scene it lists, and loads every catalogued prefab, material and animation controller through its own loader; any reference that names no file or catalogued asset, a document that does not load, or a mount that does not index cleanly, fails it)
+- Asset tooling: `asset_packer` (mesh, skeleton and animation cook, shader cook, metadata init) and the `engine_validate` content checker (`--project <dir>` catalogues the project as the engine does, checks every scene it lists, and loads every catalogued prefab, material and animation controller through its own loader; any reference that names no file or catalogued asset, a document that does not load, or a mount that does not index cleanly, fails it; `--bake-navmesh` writes each scene's navigation meshes and `--check-navmesh` fails on a stale one)
 - GitHub Actions CI under `.github/workflows/ci.yml`
 
 ## Core goals
@@ -570,6 +570,14 @@ surface's file, again whenever a bake rewrites it; a file that is missing
 or damaged leaves that surface without a mesh and is logged, and loading a
 scene reports a missing one as `missing_nav_mesh`
 (`engine_unit_nav_mesh_surface`, `engine_unit_editor_nav_mesh_bake`).
+A build bakes the same files without the editor:
+`engine_validate --bake-navmesh` loads each scene and writes every surface's
+file through the Bake button's own path, byte for byte what the editor
+writes, and `engine_validate --check-navmesh` fails on a surface whose file
+is missing or no longer what its colliders bake, so CI refuses a stale mesh;
+a surface never baked has no file name yet and is reported, since neither
+mode edits the scene (`engine_unit_nav_mesh_surface_file`,
+`engine_integration_engine_validate_navmesh`).
 `local path, why = engine.find_path(sx, sy, sz, ex, ey, ez)` asks the mesh
 whose box holds the start for the shortest walk to the end, as Unity's
 `NavMesh.CalculatePath` does: `path` lists its corners as `{x=, y=, z=}`
