@@ -143,8 +143,10 @@ bool create_gpu_resources(PassResourceState *outState, std::size_t view,
   // Render-target textures are single-level: only mip 0 is ever rendered,
   // so a generated chain would hold stale data forever. Every
   // consumer samples them 1:1 with linear filtering.
-  const auto makeTexture = [&](TextureFormat format) noexcept {
+  const auto makeTexture = [&](TextureFormat format,
+                               bool blitDestination = false) noexcept {
     TextureDesc desc{};
+    desc.blitDestination = blitDestination;
     desc.kind = TextureKind::Tex2D;
     desc.format = format;
     desc.width = w32;
@@ -175,7 +177,9 @@ bool create_gpu_resources(PassResourceState *outState, std::size_t view,
     return fail_create(next, "failed to create scene color texture");
   }
 
-  next.sceneDepthTexture = makeTexture(TextureFormat::Depth24);
+  // The deferred path seeds it from the G-buffer depth through copy_depth.
+  next.sceneDepthTexture =
+      makeTexture(TextureFormat::Depth24, /*blitDestination=*/true);
   if (next.sceneDepthTexture == kInvalidDeviceTexture) {
     return fail_create(next, "failed to create scene depth texture");
   }

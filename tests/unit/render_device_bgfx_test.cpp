@@ -275,7 +275,9 @@ void test_wide_texture_uploads(TestContext &t) {
 
 /// Render targets: empty-created color+depth attachments compose, a
 /// sampled (texel-created) texture is rejected as an attachment, and
-/// copy_depth between two depth-carrying targets is accepted.
+/// copy_depth between two depth-carrying targets is accepted when the
+/// destination's depth was created as a blit destination and dropped
+/// when it was not.
 void test_render_targets(TestContext &t) {
   const RenderDevice *dev = render_device();
   TextureDesc colorDesc{};
@@ -299,7 +301,9 @@ void test_render_targets(TestContext &t) {
   const RenderTargetHandle target = dev->create_render_target(targetDesc);
   t.check(target.value != 0U, "render target created");
 
+  // copy_depth writes only into a texture created as a blit destination.
   TextureDesc depth2Desc = depthDesc;
+  depth2Desc.blitDestination = true;
   const DeviceTextureHandle depth2 = dev->create_texture(depth2Desc);
   RenderTargetDesc target2Desc{};
   target2Desc.depth.texture = depth2;
@@ -312,6 +316,12 @@ void test_render_targets(TestContext &t) {
   dev->clear(ClearFlags::ColorDepth, 0.0f, 0.0f, 0.0f, 1.0f);
   dev->copy_depth(target, target2, 8, 8);
   t.check(dropped(dev) == before, "bind/viewport/clear/copy_depth accepted");
+  // The other way round the destination is a plain render target, which
+  // is not created as a copy destination (#1212), so the copy is refused.
+  dev->copy_depth(target2, target, 8, 8);
+  t.check(dropped(dev) == before + 1U,
+          "copy_depth into a target not created as a blit destination is "
+          "dropped");
 
   const std::uint8_t texels[4] = {};
   TextureDesc sampledDesc{};

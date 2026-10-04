@@ -187,6 +187,11 @@ struct TextureDesc final {
   // are rejected; a texture refreshed per frame must be created this
   // way (the tile/light culling data textures).
   bool cpuUpdatable = false;
+  // An empty render-target texture that copy_depth writes into. Only such
+  // a texture is created as a copy destination: on D3D12 that makes it
+  // start in the copy state, which a texture only ever drawn into (a
+  // shadow atlas) has no reason to go through.
+  bool blitDestination = false;
   // U8 RGBA8 colour data authored in sRGB (a base colour or emissive map):
   // the device decodes it to linear light when sampled, and its generated
   // mips are averaged in linear light. Data textures (roughness, occlusion,
@@ -507,7 +512,8 @@ struct RenderDevice final {
   void (*destroy_render_target)(RenderTargetHandle target) noexcept = nullptr;
   // kBackBufferTarget selects the window back buffer.
   void (*bind_render_target)(RenderTargetHandle target) noexcept = nullptr;
-  // Copies the depth attachment contents between equal-sized targets.
+  // Copies the depth attachment contents between equal-sized targets; the
+  // destination's depth texture must be created with blitDestination.
   void (*copy_depth)(RenderTargetHandle source, RenderTargetHandle destination,
                      std::int32_t width,
                      std::int32_t height) noexcept = nullptr;
