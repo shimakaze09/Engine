@@ -1590,6 +1590,16 @@ engine_add_test_executable(engine_unit_audio_formats
 target_compile_definitions(engine_unit_audio_formats PRIVATE
     ENGINE_AUDIO_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/data/audio")
 
+engine_add_test_executable(engine_unit_audio_import_settings
+    SOURCES
+    audio_import_settings_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/audio/src
+    PRIVATE_DEPS
+    engine_audio
+    engine_content
+)
+
 engine_add_test_executable(engine_unit_texture_loader
     SOURCES
     texture_loader_test.cpp

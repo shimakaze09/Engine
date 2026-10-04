@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "audio_diagnostics.h"
+#include "engine/content/asset_sidecar.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
@@ -460,9 +461,43 @@ void reset_sound_entry(SoundEntry &entry) noexcept {
   entry.generation = generation;
 }
 
+/// The import settings authored in the ".meta" sidecar beside
+/// `virtualPath`; the defaults when it has none.
+content::AudioImportSettings
+sound_import_settings(const char *virtualPath) noexcept {
+  char osPath[1024] = {};
+  content::AssetSidecar sidecar{};
+  if (core::vfs_resolve_os_path(virtualPath, osPath, sizeof(osPath)) &&
+      (content::read_asset_sidecar(osPath, &sidecar) ==
+       content::SidecarReadResult::Ok) &&
+      sidecar.hasAudioImport) {
+    return sidecar.audioImport;
+  }
+  return content::AudioImportSettings{};
+}
+
 } // namespace
 
 std::size_t audio_decoder_opens() noexcept { return g_decoderOpens; }
+
+bool audio_sound_format(SoundHandle handle, std::uint32_t *channels,
+                        std::uint32_t *sampleRate,
+                        std::uint64_t *frames) noexcept {
+  const SoundEntry *entry = lookup_sound_entry(handle);
+  if (entry == nullptr) {
+    return false;
+  }
+  if (channels != nullptr) {
+    *channels = entry->channels;
+  }
+  if (sampleRate != nullptr) {
+    *sampleRate = entry->sampleRate;
+  }
+  if (frames != nullptr) {
+    *frames = entry->pcmFrames;
+  }
+  return true;
+}
 
 std::size_t audio_loaded_sound_count() noexcept {
   std::size_t count = 0U;
@@ -745,6 +780,16 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
   SoundEntry &entry = g_audio.sounds[slot];
   ma_decoder decoder{};
   ma_decoder_config decoderConfig = ma_decoder_config_init_default();
+  // The sound's import settings resample it and fold it to one channel as
+  // it decodes, so the PCM held is already what was asked for. They are
+  // read once, here: a sound already loaded keeps its decode until it is
+  // unloaded.
+  const content::AudioImportSettings settings =
+      sound_import_settings(virtualPath);
+  decoderConfig.sampleRate = settings.sampleRate;
+  if (settings.forceMono) {
+    decoderConfig.channels = 1U;
+  }
   ++g_decoderOpens;
   ma_result res =
       ma_decoder_init_memory(fileData, fileSize, &decoderConfig, &decoder);
