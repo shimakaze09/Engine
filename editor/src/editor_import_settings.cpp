@@ -6,7 +6,9 @@
 
 #include <cstring>
 
+#include "engine/content/asset_identity.h"
 #include "engine/content/asset_sidecar.h"
+#include "engine/core/vfs.h"
 
 namespace engine::editor {
 
@@ -56,6 +58,11 @@ void read_into_cache(const char *assetPath) noexcept {
   g_cache.document.textureSettings = sidecar.textureImport;
   g_cache.document.hasAudioSettings = sidecar.hasAudioImport;
   g_cache.document.audioSettings = sidecar.audioImport;
+  g_cache.document.folder = sidecar.folder;
+  if (!sidecar.folder) {
+    g_cache.document.resolvedReadable =
+        content::resolve_import_settings(assetPath, &g_cache.document.resolved);
+  }
 }
 
 } // namespace
@@ -136,6 +143,47 @@ bool save_import_settings(
         sidecar->hasAudioImport = true;
         sidecar->audioImport = settings;
       });
+}
+
+bool clear_import_settings(const char *path,
+                           content::ImportSettingsKind kind) noexcept {
+  return rewrite_sidecar_settings(
+      path, [kind](content::AssetSidecar *sidecar) noexcept {
+        switch (kind) {
+        case content::ImportSettingsKind::Mesh:
+          sidecar->hasMeshImport = false;
+          sidecar->meshImport = content::MeshImportSettings{};
+          break;
+        case content::ImportSettingsKind::Texture:
+          sidecar->hasTextureImport = false;
+          sidecar->textureImport = content::TextureImportSettings{};
+          break;
+        case content::ImportSettingsKind::Audio:
+          sidecar->hasAudioImport = false;
+          sidecar->audioImport = content::AudioImportSettings{};
+          break;
+        case content::ImportSettingsKind::None:
+          break;
+        }
+      });
+}
+
+bool give_folder_import_settings(const char *folderPath) noexcept {
+  invalidate_import_settings_cache();
+  if ((folderPath == nullptr) || (folderPath[0] == '\0') ||
+      !core::os_directory_exists(folderPath)) {
+    return false;
+  }
+  content::AssetSidecar existing{};
+  if (content::read_asset_sidecar(folderPath, &existing) !=
+      content::SidecarReadResult::Absent) {
+    return false;
+  }
+  content::AssetSidecar sidecar{};
+  sidecar.guid = content::generate_asset_guid();
+  sidecar.folder = true;
+  return content::asset_guid_is_valid(sidecar.guid) &&
+         content::write_asset_sidecar(folderPath, sidecar);
 }
 
 void invalidate_import_settings_cache() noexcept { g_cache.valid = false; }

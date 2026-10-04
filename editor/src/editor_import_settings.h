@@ -2,7 +2,9 @@
 // source's authored ".meta" sidecar is read and parsed once per
 // selection, or after the panel rewrites it, instead of once per drawn
 // frame. A mesh source's settings feed its cook; a texture source's are
-// applied when the texture loads, and a sound source's when it decodes.
+// applied when the texture loads, and a sound source's when it decodes. A
+// folder's sidecar sets them for every asset below it without its own
+// (import_settings_resolve.h), and the document says which applies.
 //
 // The authored sidecar is the only place import settings live. The cook
 // reads them from there and writes them nowhere, so the panel edits the
@@ -13,7 +15,9 @@
 
 #include <cstdint>
 
+#include "engine/content/asset_import_settings.h"
 #include "engine/content/asset_metadata.h"
+#include "engine/content/import_settings_resolve.h"
 
 namespace engine::editor {
 
@@ -44,6 +48,15 @@ struct ImportSettingsDocument final {
   /// defaults.
   bool hasAudioSettings = false;
   content::AudioImportSettings audioSettings{};
+  /// True for a folder's sidecar, whose blocks above are the ones it sets
+  /// for the assets below it.
+  bool folder = false;
+  /// For an asset, the settings that apply to it and where they come from:
+  /// its own block, an enclosing folder's, or the defaults.
+  /// `resolvedReadable` is false when a sidecar on the way will not read
+  /// (`resolved.unreadable` names it).
+  content::ResolvedImportSettings resolved{};
+  bool resolvedReadable = true;
 };
 
 /// Returns the authored sidecar for `assetPath`, reading the file only
@@ -68,6 +81,18 @@ bool save_import_settings(
 bool save_import_settings(
     const char *assetPath,
     const content::AudioImportSettings &settings) noexcept;
+
+/// Removes the block of `kind` from the sidecar at `path`, keeping its
+/// identity: an asset then inherits its folder's settings again, and a
+/// folder stops setting that type for the assets below it. False when the
+/// sidecar is absent or will not read. Invalidates the cache either way.
+bool clear_import_settings(const char *path,
+                           content::ImportSettingsKind kind) noexcept;
+
+/// Gives the folder at `folderPath` a sidecar, a fresh identity and no
+/// settings, so its import settings can be edited; as Unity gives every
+/// folder a ".meta". False when it already has one, or the write fails.
+bool give_folder_import_settings(const char *folderPath) noexcept;
 
 /// Drops the cached document so the next call re-reads it (after the panel
 /// rewrote the sidecar, or a recook replaced it).

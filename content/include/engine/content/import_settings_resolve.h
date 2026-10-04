@@ -5,9 +5,9 @@
 // an asset overrides them by carrying a block of its own, whole.
 //
 // Unity and Godot configure importers per asset and leave subtrees to
-// presets or scripts; the owner asked for folder inheritance outright
-// (#150), so a folder's sidecar holds one block per asset type and the
-// nearest one wins. An asset's own block replaces the folder's rather
+// presets or scripts; here a folder configures its subtree directly, so a
+// folder's sidecar holds one block per asset type and the nearest one
+// wins. An asset's own block replaces the folder's rather
 // than merging field by field: what the author sees in the asset's block
 // is everything it gets, and an editor save writes the block whole.
 
