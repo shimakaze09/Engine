@@ -22,8 +22,15 @@
 // ctest entry since each concerns the process's own early frames:
 //   after-boot       the frame after the fixture's first, as above
 //                    (default);
-//   second-frame     the frame after that, one frame later;
-//   settled          a frame well after both, with nothing else changing;
+//   after-boot-no-reset
+//                    the same frame with the fixture issuing no reset, so
+//                    r_vsync keeps its boot value throughout;
+//   after-boot-unchanged
+//                    as after-boot-no-reset, run with the cvars the suite
+//                    sets given as boot values (its ctest entry does), so
+//                    nothing at all changes on that frame;
+//   third-frame      the process's third frame, one after after-boot's;
+//   settled          a frame well after those, with nothing else changing;
 //   after-vsync-on   a settled frame on which a reset turning vsync on
 //                    takes effect;
 //   after-vsync-off  a settled frame on which a reset turning vsync off
@@ -47,7 +54,7 @@ constexpr int kCycles = 6;
 /// comment.
 enum class FirstRender {
   AfterBoot,
-  SecondFrame,
+  ThirdFrame,
   Settled,
   AfterVsyncOn,
   AfterVsyncOff
@@ -58,6 +65,9 @@ FirstRender g_firstRender = FirstRender::AfterBoot;
 /// The argument naming g_firstRender; it prefixes the capture files, since
 /// the entries run side by side in one working directory.
 const char *g_firstRenderName = "after-boot";
+
+/// Whether the fixture's swapchain reset takes effect on the second frame.
+bool g_resetOnSecondFrame = true;
 
 /// Mean brightness of the (2r+1)^2 block centred on (cx, cy).
 double block_level(const CapturedFrame &frame, int cx, int cy, int r) noexcept {
@@ -146,7 +156,7 @@ bool reach_first_render_frame(engine::EnginePipeline &pipeline) noexcept {
   switch (g_firstRender) {
   case FirstRender::AfterBoot:
     return true;
-  case FirstRender::SecondFrame:
+  case FirstRender::ThirdFrame:
     return settle_frames(pipeline, 1);
   case FirstRender::Settled:
     return settle_frames(pipeline, 8);
@@ -291,8 +301,11 @@ int main(int argc, char **argv) {
     static constexpr struct {
       const char *name;
       FirstRender frame;
+      bool resetOnSecondFrame = true;
     } kFrames[] = {{"after-boot", FirstRender::AfterBoot},
-                   {"second-frame", FirstRender::SecondFrame},
+                   {"after-boot-no-reset", FirstRender::AfterBoot, false},
+                   {"after-boot-unchanged", FirstRender::AfterBoot, false},
+                   {"third-frame", FirstRender::ThirdFrame},
                    {"settled", FirstRender::Settled},
                    {"after-vsync-on", FirstRender::AfterVsyncOn},
                    {"after-vsync-off", FirstRender::AfterVsyncOff}};
@@ -301,6 +314,7 @@ int main(int argc, char **argv) {
       if (std::strcmp(argv[1], frame.name) == 0) {
         g_firstRender = frame.frame;
         g_firstRenderName = frame.name;
+        g_resetOnSecondFrame = frame.resetOnSecondFrame;
         known = true;
       }
     }
@@ -310,5 +324,5 @@ int main(int argc, char **argv) {
     }
   }
   return engine::tests::run_gpu_scene_test("shadow_cache_far_cascade_gpu_test",
-                                           &run);
+                                           &run, nullptr, g_resetOnSecondFrame);
 }

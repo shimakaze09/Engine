@@ -161,9 +161,13 @@ inline bool settle_frames(engine::EnginePipeline &pipeline,
 /// With firstFrameScene the World is emptied and that scene authored before
 /// the first frame instead, and the body receives it as drawn: exit code 7
 /// is a first-frame scene that could not be built.
-inline int
-run_gpu_scene_test(const char *name, GpuSceneBody body,
-                   GpuFirstFrameScene firstFrameScene = nullptr) noexcept {
+///
+/// The first frame turns r_vsync off, so a swapchain reset takes effect on
+/// the second; with resetOnSecondFrame false r_vsync keeps its boot value
+/// and no reset is issued, so every frame is presented with vsync.
+inline int run_gpu_scene_test(const char *name, GpuSceneBody body,
+                              GpuFirstFrameScene firstFrameScene = nullptr,
+                              bool resetOnSecondFrame = true) noexcept {
   if (!engine::tests::enter_asset_root()) {
     return 1;
   }
@@ -212,7 +216,8 @@ run_gpu_scene_test(const char *name, GpuSceneBody body,
         // — and, r_vsync having left its boot value, it is also a frame on
         // which the device resets its swapchain.
         const bool configured =
-            firstSceneBuilt && core::cvar_set_int("r_vsync", 0) &&
+            firstSceneBuilt &&
+            (!resetOnSecondFrame || core::cvar_set_int("r_vsync", 0)) &&
             core::cvar_set_int("r_max_fps", 0) &&
             core::cvar_set_bool("r_present_scene", true) &&
             pipeline.execute_frame() &&

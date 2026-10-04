@@ -271,8 +271,8 @@ set_tests_properties(engine_integration_shadow_cache_far_cascade_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 # The same suite with the cascades' first render on other early frames
 # (the suite's file comment lists them).
-foreach(_first_render IN ITEMS
-        second-frame settled after-vsync-on after-vsync-off)
+foreach(_first_render IN ITEMS after-boot-no-reset after-boot-unchanged
+        third-frame settled after-vsync-on after-vsync-off)
     string(REPLACE "-" "_" _first_render_suffix "${_first_render}")
     set(_far_cascade_test
         engine_integration_shadow_cache_far_cascade_gpu_${_first_render_suffix})
@@ -282,6 +282,12 @@ foreach(_first_render IN ITEMS
         LABELS "gpu;integration"
         SKIP_REGULAR_EXPRESSION "SKIPPED:")
 endforeach()
+# The cvars the suite turns off after the fixture's first frame, given as
+# boot values so that frame is not also the one the post stack changes on.
+set_property(TEST
+    engine_integration_shadow_cache_far_cascade_gpu_after_boot_unchanged
+    PROPERTY ENVIRONMENT
+    "ENGINE_CVAR_r_fog_mode=off;ENGINE_CVAR_r_bloom=0;ENGINE_CVAR_r_ssao=0;ENGINE_CVAR_r_fxaa=0")
 
 engine_add_test_executable(engine_integration_srgb_texture_gpu
     SOURCES
