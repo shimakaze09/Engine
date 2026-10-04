@@ -307,6 +307,25 @@ bool read_nav_mesh_surface_component(
     const core::JsonParser &parser, const core::JsonValue &value,
     NavMeshSurfaceComponent *outComponent) noexcept;
 
+// --- ScriptPropertiesComponent ---------------------------------------------
+
+/// Writes an entity's script property overrides as an object under `key`,
+/// one member per override in their order: a bool as true/false, a string
+/// as a string, an integer as a JSON integer and a float always with a
+/// '.' or an exponent, so the reader tells the two apart as Lua 5.4 does.
+/// An empty set writes nothing.
+void write_script_properties_component(
+    core::JsonWriter &writer, const char *key,
+    const ScriptPropertiesComponent &component) noexcept;
+/// Reads a property override object. Strict: a value that is not an
+/// object, more than kMaxOverrides members, a name that is not a Lua
+/// identifier of at most 31 bytes, a repeated name, a string past 47 bytes,
+/// a non-finite or out-of-range number, or any other JSON type fails the
+/// read; nothing is truncated or dropped.
+bool read_script_properties_component(
+    const core::JsonParser &parser, const core::JsonValue &object,
+    ScriptPropertiesComponent *outComponent) noexcept;
+
 // --- AnimationComponent ----------------------------------------------------
 
 /// Writes the animation component under `key`, carrying every authored

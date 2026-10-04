@@ -173,8 +173,7 @@ void make_test_value(MeshComponent *out) noexcept {
   out->sceneCaptureSourceId = 9U;
 }
 
-bool components_equal(const MeshComponent &a,
-                      const MeshComponent &b) noexcept {
+bool components_equal(const MeshComponent &a, const MeshComponent &b) noexcept {
   return (a.meshRef == b.meshRef) && (a.materialRef == b.materialRef) &&
          vec3_equal(a.albedo, b.albedo) && (a.roughness == b.roughness) &&
          (a.metallic == b.metallic) && (a.opacity == b.opacity) &&
@@ -185,8 +184,7 @@ void make_test_value(NameComponent *out) noexcept {
   std::snprintf(out->name, sizeof(out->name), "%s", "Registry \"Subject\"");
 }
 
-bool components_equal(const NameComponent &a,
-                      const NameComponent &b) noexcept {
+bool components_equal(const NameComponent &a, const NameComponent &b) noexcept {
   return std::strcmp(a.name, b.name) == 0;
 }
 
@@ -224,8 +222,7 @@ void make_test_value(SpringArmComponent *out) noexcept {
 
 bool components_equal(const SpringArmComponent &a,
                       const SpringArmComponent &b) noexcept {
-  return (a.armLength == b.armLength) &&
-         (a.currentLength == b.currentLength) &&
+  return (a.armLength == b.armLength) && (a.currentLength == b.currentLength) &&
          vec3_equal(a.offset, b.offset) && (a.lagSpeed == b.lagSpeed) &&
          (a.collisionRadius == b.collisionRadius) &&
          (a.collisionEnabled == b.collisionEnabled);
@@ -426,8 +423,8 @@ bool components_equal(
   return (a.halfExtents.x == b.halfExtents.x) &&
          (a.halfExtents.y == b.halfExtents.y) &&
          (a.halfExtents.z == b.halfExtents.z) && (a.cellSize == b.cellSize) &&
-         (a.agentRadius == b.agentRadius) &&
-         (a.agentHeight == b.agentHeight) && (a.maxClimb == b.maxClimb) &&
+         (a.agentRadius == b.agentRadius) && (a.agentHeight == b.agentHeight) &&
+         (a.maxClimb == b.maxClimb) &&
          (a.maxSlopeDegrees == b.maxSlopeDegrees) &&
          (std::strcmp(a.navMeshPath, b.navMeshPath) == 0);
 }
@@ -460,6 +457,53 @@ bool components_equal(const engine::runtime::TagSetComponent &a,
   }
   for (std::uint32_t i = 0U; i < a.count; ++i) {
     if (std::strcmp(a.tags[i], b.tags[i]) != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Every value type, including a float with an integral value that must
+/// come back a float, a negative integer and a string with a quote.
+void make_test_value(engine::runtime::ScriptPropertiesComponent *out) noexcept {
+  using engine::runtime::ScriptPropertyType;
+  using engine::runtime::ScriptPropertyValue;
+  ScriptPropertyValue speed{};
+  speed.type = ScriptPropertyType::Float;
+  speed.floatValue = 3.0F;
+  ScriptPropertyValue lives{};
+  lives.type = ScriptPropertyType::Integer;
+  lives.integerValue = -7;
+  ScriptPropertyValue enabled{};
+  enabled.type = ScriptPropertyType::Bool;
+  enabled.boolValue = true;
+  ScriptPropertyValue target{};
+  target.type = ScriptPropertyType::String;
+  std::snprintf(target.text, sizeof(target.text), "%s", "the \"Goal\"");
+  ScriptPropertyValue fine{};
+  fine.type = ScriptPropertyType::Float;
+  fine.floatValue = 0.15F;
+  static_cast<void>(
+      engine::runtime::script_properties_set(out, "speed", speed));
+  static_cast<void>(
+      engine::runtime::script_properties_set(out, "lives", lives));
+  static_cast<void>(
+      engine::runtime::script_properties_set(out, "enabled", enabled));
+  static_cast<void>(
+      engine::runtime::script_properties_set(out, "target", target));
+  static_cast<void>(engine::runtime::script_properties_set(out, "fine", fine));
+}
+
+bool components_equal(
+    const engine::runtime::ScriptPropertiesComponent &a,
+    const engine::runtime::ScriptPropertiesComponent &b) noexcept {
+  if (a.count != b.count) {
+    return false;
+  }
+  for (std::uint32_t i = 0U; i < a.count; ++i) {
+    if ((std::strcmp(a.overrides[i].name, b.overrides[i].name) != 0) ||
+        !engine::math::script_property_values_equal(a.overrides[i].value,
+                                                    b.overrides[i].value)) {
       return false;
     }
   }
@@ -625,7 +669,7 @@ int verify_prefab_mesh_reference_parity() {
 // Count tripwire: bumping this is an intentional act that accompanies a new
 // registry row, a World::PersistentComponentTypes entry, and the test-value/
 // comparator overloads above.
-static_assert(engine::runtime::kPersistentComponentTypeCount == 20U,
+static_assert(engine::runtime::kPersistentComponentTypeCount == 21U,
               "new persistent component type: extend the registry table, the "
               "World type list, and this suite's overloads together");
 

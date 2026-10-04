@@ -218,6 +218,8 @@ bool decode_scene_component(const core::JsonParser &parser,
     return read_animation_component(parser, value, false, out);
   } else if constexpr (std::is_same_v<T, TagSetComponent>) {
     return read_tag_set_component(parser, value, out);
+  } else if constexpr (std::is_same_v<T, ScriptPropertiesComponent>) {
+    return read_script_properties_component(parser, value, out);
   } else {
     static_cast<void>(documentVersion);
     return read_reflected_component(parser, value,
@@ -262,6 +264,9 @@ bool encode_scene_component(core::JsonWriter &writer, const char *key,
     return true;
   } else if constexpr (std::is_same_v<T, TagSetComponent>) {
     write_tag_set_component(writer, key, component);
+    return true;
+  } else if constexpr (std::is_same_v<T, ScriptPropertiesComponent>) {
+    write_script_properties_component(writer, key, component);
     return true;
   } else {
     return write_reflected_component(

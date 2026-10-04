@@ -913,6 +913,13 @@ engine_add_test_executable(engine_unit_world_tag_set
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_world_script_properties
+    SOURCES
+    world_script_properties_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_vfs
     SOURCES
     vfs_test.cpp

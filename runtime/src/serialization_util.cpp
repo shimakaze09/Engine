@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <new>
 
@@ -16,6 +17,7 @@
 #include "engine/content/asset_ref_json.h"
 #include "engine/core/atomic_file.h"
 #include "engine/core/logging.h"
+#include "engine/core/text_parse.h"
 #include "engine/runtime/reflect_types.h"
 #include "engine/runtime/serialization_keys.h"
 
@@ -928,6 +930,119 @@ bool read_tag_set_component(const core::JsonParser &parser,
   return true;
 }
 
+void write_script_properties_component(
+    core::JsonWriter &writer, const char *key,
+    const ScriptPropertiesComponent &component) noexcept {
+  // An empty set writes nothing: an entity whose overrides were all reset
+  // saves exactly as one that never had any.
+  if (component.count == 0U) {
+    return;
+  }
+  writer.write_key(key);
+  writer.begin_object();
+  const std::size_t count =
+      (component.count < ScriptPropertiesComponent::kMaxOverrides)
+          ? component.count
+          : ScriptPropertiesComponent::kMaxOverrides;
+  for (std::size_t i = 0U; i < count; ++i) {
+    const ScriptPropertiesComponent::Override &entry = component.overrides[i];
+    switch (entry.value.type) {
+    case ScriptPropertyType::Bool:
+      writer.write_bool(entry.name, entry.value.boolValue);
+      break;
+    case ScriptPropertyType::Integer:
+      writer.write_int64(entry.name, entry.value.integerValue);
+      break;
+    case ScriptPropertyType::String:
+      writer.write_string(entry.name, entry.value.text);
+      break;
+    case ScriptPropertyType::Float: {
+      // The shortest spelling that reads back as the same float, with a
+      // ".0" when it would otherwise read as an integer. A property name
+      // is an identifier, so it is its own escaped key.
+      char number[48] = {};
+      int written = 0;
+      for (int precision = 1; precision <= 9; ++precision) {
+        written = std::snprintf(number, sizeof(number), "%.*g", precision,
+                                static_cast<double>(entry.value.floatValue));
+        float parsed = 0.0F;
+        if ((written > 0) && core::parse_float_token(number, &parsed) &&
+            (parsed == entry.value.floatValue)) {
+          break;
+        }
+      }
+      if ((written > 0) && (std::strpbrk(number, ".eE") == nullptr)) {
+        std::snprintf(number + written, sizeof(number) - written, ".0");
+      }
+      writer.write_raw_member(entry.name, std::strlen(entry.name), number,
+                              std::strlen(number));
+      break;
+    }
+    }
+  }
+  writer.end_object();
+}
+
+bool read_script_properties_component(
+    const core::JsonParser &parser, const core::JsonValue &object,
+    ScriptPropertiesComponent *outComponent) noexcept {
+  if ((outComponent == nullptr) ||
+      (object.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+  const std::size_t count = parser.object_size(object);
+  if (count > ScriptPropertiesComponent::kMaxOverrides) {
+    return false;
+  }
+  ScriptPropertiesComponent component{};
+  for (std::size_t i = 0U; i < count; ++i) {
+    core::JsonValue key{};
+    core::JsonValue member{};
+    char name[kMaxScriptPropertyNameLength + 1U] = {};
+    if (!parser.get_object_member(object, i, &key, &member) ||
+        !parser.copy_string_strict(key, name, sizeof(name)) ||
+        (script_property_override(component, name) != nullptr)) {
+      return false;
+    }
+    ScriptPropertyValue value{};
+    if (member.type == core::JsonValue::Type::Bool) {
+      value.type = ScriptPropertyType::Bool;
+      if (!parser.as_bool(member, &value.boolValue)) {
+        return false;
+      }
+    } else if (member.type == core::JsonValue::Type::String) {
+      value.type = ScriptPropertyType::String;
+      if (!parser.copy_string_strict(member, value.text, sizeof(value.text))) {
+        return false;
+      }
+    } else if (member.type == core::JsonValue::Type::Number) {
+      // Spelled as Lua reads it: a '.' or an exponent makes a float.
+      bool isFloat = false;
+      for (const char *c = member.begin; c < member.end; ++c) {
+        isFloat = isFloat || (*c == '.') || (*c == 'e') || (*c == 'E');
+      }
+      if (isFloat) {
+        value.type = ScriptPropertyType::Float;
+        if (!parser.as_float(member, &value.floatValue)) {
+          return false;
+        }
+      } else {
+        value.type = ScriptPropertyType::Integer;
+        if (!parser.as_int64(member, &value.integerValue)) {
+          return false;
+        }
+      }
+    } else {
+      return false;
+    }
+    if (!script_properties_set(&component, name, value)) {
+      return false;
+    }
+  }
+  *outComponent = component;
+  return true;
+}
+
 void write_foliage_patch_component(
     core::JsonWriter &writer, const FoliagePatchComponent &component) noexcept {
   writer.write_key(kJsonKeyFoliagePatchComponent);
@@ -944,8 +1059,8 @@ void write_foliage_patch_component(
     // reference and never a dropped one.
     char text[content::kAssetRefTextLength + 1U] = {};
     if (core::asset_ref_is_valid(component.meshRefs[i])) {
-      static_cast<void>(content::format_asset_ref(component.meshRefs[i], text,
-                                                  sizeof(text)));
+      static_cast<void>(
+          content::format_asset_ref(component.meshRefs[i], text, sizeof(text)));
     }
     writer.write_string_value(text);
   }
