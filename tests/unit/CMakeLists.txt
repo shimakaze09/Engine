@@ -593,6 +593,13 @@ engine_add_test_executable(engine_unit_scripting
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_script_property_scan
+    SOURCES
+    script_property_scan_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+)
+
 engine_add_test_executable(engine_unit_lua_error_diagnostic
     SOURCES
     lua_error_diagnostic_test.cpp
