@@ -3,7 +3,9 @@
 // dropped onto a triangle-mesh floor come to rest on it, at the heights
 // the box-floor rest suite holds an analytic floor to; a mesh on a moving
 // body collides with nothing; and a TriMesh collider whose mesh is not
-// installed is not a floor.
+// installed is not a floor. Raycasts, sweeps and overlaps meet the mesh's
+// triangles, not its bounds, and a character walks on it and stops at a
+// wall made of triangles.
 
 #include <cmath>
 #include <cstdint>
@@ -13,7 +15,9 @@
 
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
+#include "engine/physics/character_move.h"
 #include "engine/physics/physics_context.h"
+#include "engine/physics/physics_query.h"
 #include "engine/physics/tri_mesh.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
@@ -290,6 +294,124 @@ void check_missing_mesh_is_not_a_floor() {
                 "a TriMesh collider whose mesh is not installed is no floor");
 }
 
+/// A static TriMesh holding a floor of `n` x `n` quads and, when `wallX`
+/// is finite, a wall: a vertical quad across the floor at x = `wallX`.
+runtime::Entity add_mesh(runtime::World &world, float wallX) {
+  std::vector<math::Vec3> vertices{};
+  std::vector<std::uint32_t> indices{};
+  const std::uint32_t n = 8U;
+  const float half = 4.0F;
+  for (std::uint32_t z = 0U; z <= n; ++z) {
+    for (std::uint32_t x = 0U; x <= n; ++x) {
+      vertices.emplace_back(static_cast<float>(x) - half, 0.0F,
+                            static_cast<float>(z) - half);
+    }
+  }
+  for (std::uint32_t z = 0U; z < n; ++z) {
+    for (std::uint32_t x = 0U; x < n; ++x) {
+      const std::uint32_t a = (z * (n + 1U)) + x;
+      indices.insert(indices.end(),
+                     {a, a + n + 1U, a + 1U, a + 1U, a + n + 1U, a + n + 2U});
+    }
+  }
+  if (std::isfinite(wallX)) {
+    const std::uint32_t w = static_cast<std::uint32_t>(vertices.size());
+    vertices.emplace_back(wallX, 0.0F, -half);
+    vertices.emplace_back(wallX, 3.0F, -half);
+    vertices.emplace_back(wallX, 0.0F, half);
+    vertices.emplace_back(wallX, 3.0F, half);
+    indices.insert(indices.end(), {w, w + 1U, w + 2U, w + 2U, w + 1U, w + 3U});
+  }
+  physics::TriMeshRef mesh{};
+  static_cast<void>(physics::build_tri_mesh(
+      vertices.data(), vertices.size(), indices.data(), indices.size(), &mesh));
+  const runtime::Entity entity =
+      world.create_scene_object(runtime::Transform{});
+  runtime::Collider collider{};
+  collider.shape = runtime::ColliderShape::TriMesh;
+  g_tests.check((entity != runtime::kInvalidEntity) &&
+                    world.add_collider(entity, collider) &&
+                    runtime::set_tri_mesh_data(world, entity, mesh),
+                "the query mesh is created");
+  return entity;
+}
+
+void check_queries_meet_triangles() {
+  std::unique_ptr<runtime::World> world = make_world();
+  if (world == nullptr) {
+    g_tests.fail("a world is created");
+    return;
+  }
+  const runtime::Entity mesh = add_mesh(*world, INFINITY);
+  physics::PhysicsRaycastHit ray{};
+  g_tests.check(runtime::raycast(*world, math::Vec3(0.3F, 5.0F, 0.4F),
+                                 math::Vec3(0.0F, -1.0F, 0.0F), 10.0F, &ray) &&
+                    (ray.entity == mesh) &&
+                    (std::fabs(ray.distance - 5.0F) < 1.0e-5F) &&
+                    (ray.normal.y > 0.99999F),
+                "a ray down onto the mesh hits its floor, normal up");
+  // The mesh's bounds are a flat box; a ray beside the floor but inside the
+  // bounds' footprint height has nothing to hit.
+  g_tests.check(!runtime::raycast(*world, math::Vec3(5.0F, 5.0F, 0.0F),
+                                  math::Vec3(0.0F, -1.0F, 0.0F), 10.0F, &ray),
+                "a ray beside the mesh misses it");
+
+  physics::SweepHit sweep{};
+  // Conservative advancement stops within its 1e-5 tolerance steps of the
+  // surface, a few of which can accrue before the hit.
+  g_tests.check(runtime::sweep_sphere(*world, math::Vec3(0.3F, 3.0F, 0.4F),
+                                      0.5F, math::Vec3(0.0F, -1.0F, 0.0F),
+                                      10.0F, &sweep) &&
+                    (sweep.entityIndex == mesh.index) &&
+                    (std::fabs(sweep.distance - 2.5F) < 1.0e-4F) &&
+                    (sweep.normal.y > 0.99999F),
+                "a sphere swept down stops on the floor, normal up");
+
+  std::uint32_t found[4] = {};
+  g_tests.check(runtime::overlap_sphere(*world, math::Vec3(0.2F, 0.4F, 0.1F),
+                                        0.5F, found, 4U) == 1U,
+                "a sphere dipping into the floor overlaps the mesh");
+  g_tests.check(runtime::overlap_sphere(*world, math::Vec3(0.2F, 0.6F, 0.1F),
+                                        0.5F, found, 4U) == 0U,
+                "a sphere above the floor, inside the mesh's bounds, does not");
+}
+
+void check_character_walks_on_mesh() {
+  std::unique_ptr<runtime::World> world = make_world();
+  if (world == nullptr) {
+    g_tests.fail("a world is created");
+    return;
+  }
+  const runtime::Entity mesh = add_mesh(*world, 2.0F);
+  constexpr float kRadius = 0.3F;
+  constexpr float kSkin = 0.02F;
+  physics::CharacterMoveSettings settings{};
+  settings.skinWidth = kSkin;
+  settings.wasGrounded = true;
+  const auto capsule_at = [&](const math::Vec3 &feet) {
+    return physics::CharacterCapsule{
+        math::add(feet, math::Vec3(0.0F, kRadius, 0.0F)),
+        math::add(feet, math::Vec3(0.0F, 1.8F - kRadius, 0.0F)), kRadius};
+  };
+  physics::CharacterMoveResult walk{};
+  g_tests.check(physics::move_character(
+                    *world, capsule_at(math::Vec3(-2.0F, kSkin, 0.3F)),
+                    math::Vec3(1.0F, -0.1F, 0.0F), settings, &walk) &&
+                    (std::fabs(walk.translation.x - 1.0F) < 1.0e-4F) &&
+                    (std::fabs(walk.translation.y) < 1.0e-3F) &&
+                    walk.grounded && (walk.ground == mesh),
+                "a character walks across the mesh floor on its skin gap");
+
+  physics::CharacterMoveResult blocked{};
+  g_tests.check(physics::move_character(
+                    *world, capsule_at(math::Vec3(0.0F, kSkin, 0.3F)),
+                    math::Vec3(3.0F, 0.0F, 0.0F), settings, &blocked) &&
+                    (blocked.translation.x < (2.0F - kRadius)) &&
+                    (blocked.translation.x > (2.0F - kRadius - 2.0F * kSkin)) &&
+                    ((blocked.flags & physics::kCharacterCollidedSides) != 0U),
+                "a character stops at the mesh's wall, a skin gap short");
+}
+
 } // namespace
 
 /// Runs the TriMesh collision suite.
@@ -299,5 +421,7 @@ int main() {
   check_tilted_box_settles_flat();
   check_mesh_on_moving_body_collides_with_nothing();
   check_missing_mesh_is_not_a_floor();
+  check_queries_meet_triangles();
+  check_character_walks_on_mesh();
   return g_tests.finish("tri mesh collision");
 }

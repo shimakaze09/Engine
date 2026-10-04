@@ -69,9 +69,25 @@ local_support_point(const ColliderWorldGeometry &geometry,
   case math::ColliderShape::AABB:
   case math::ColliderShape::Heightfield:
     return signed_extent(localDirection, geometry.halfExtents);
-  case math::ColliderShape::TriMesh:
-    return math::add(geometry.localCenter,
-                     signed_extent(localDirection, geometry.halfExtents));
+  case math::ColliderShape::TriMesh: {
+    const TriMeshData *const mesh = geometry.triMesh;
+    if ((mesh == nullptr) || (geometry.triangle >= mesh->triangle_count())) {
+      return math::add(geometry.localCenter,
+                       signed_extent(localDirection, geometry.halfExtents));
+    }
+    std::size_t best = 0U;
+    float bestProjection =
+        math::dot(mesh->corner(geometry.triangle, 0U), localDirection);
+    for (std::size_t corner = 1U; corner < 3U; ++corner) {
+      const float projection =
+          math::dot(mesh->corner(geometry.triangle, corner), localDirection);
+      if (projection > bestProjection) {
+        bestProjection = projection;
+        best = corner;
+      }
+    }
+    return mesh->corner(geometry.triangle, best);
+  }
   case math::ColliderShape::Sphere: {
     const float lengthSquared = math::dot(localDirection, localDirection);
     if (!(lengthSquared > 0.0F) || !finite(lengthSquared)) {

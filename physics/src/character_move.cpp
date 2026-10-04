@@ -14,6 +14,7 @@
 #include "engine/physics/physics_query.h"
 #include "engine/physics/physics_world_view.h"
 #include "physics_internal.h"
+#include "tri_mesh_world.h"
 
 namespace engine::physics {
 
@@ -335,25 +336,31 @@ bool deepest_overlap(const PhysicsWorldView &world,
     if (!blocks(world, settings, entities[i], colliders[i])) {
       continue;
     }
-    ColliderWorldGeometry shape{};
-    if (!world_collider_geometry(world, entities[i], colliders[i], &shape) ||
-        !math::aabb_intersects(bounds, shape.worldAabb)) {
+    ColliderWorldGeometry whole{};
+    if (!world_collider_geometry(world, entities[i], colliders[i], &whole) ||
+        !math::aabb_intersects(bounds, whole.worldAabb)) {
       continue;
     }
-    Contact contact{};
-    if (!measure_contact(capsule, shape, &contact) ||
-        (contact.separation >= 0.0F)) {
-      continue;
-    }
-    // Deepest first; equal depths go to the lower entity index, so the
-    // order the world stores colliders in never decides.
-    if (!found || (contact.separation < out->separation) ||
-        ((contact.separation == out->separation) &&
-         (entities[i].index < out->entity.index))) {
-      contact.entity = entities[i];
-      *out = contact;
-      found = true;
-    }
+    // A mesh is met triangle by triangle, each a convex piece.
+    for_each_shape_piece(
+        whole, bounds, [&](const ColliderWorldGeometry &shape) noexcept {
+          Contact contact{};
+          if (!math::aabb_intersects(bounds, shape.worldAabb) ||
+              !measure_contact(capsule, shape, &contact) ||
+              (contact.separation >= 0.0F)) {
+            return true;
+          }
+          // Deepest first; equal depths go to the lower entity index, so
+          // the order the world stores colliders in never decides.
+          if (!found || (contact.separation < out->separation) ||
+              ((contact.separation == out->separation) &&
+               (entities[i].index < out->entity.index))) {
+            contact.entity = entities[i];
+            *out = contact;
+            found = true;
+          }
+          return true;
+        });
   }
   return found;
 }
@@ -419,32 +426,38 @@ bool sweep(const PhysicsWorldView &world, const CharacterCapsule &capsule,
     if (!blocks(world, settings, entities[i], colliders[i])) {
       continue;
     }
-    ColliderWorldGeometry shape{};
-    if (!world_collider_geometry(world, entities[i], colliders[i], &shape) ||
-        !math::aabb_intersects(swept, shape.worldAabb)) {
+    ColliderWorldGeometry whole{};
+    if (!world_collider_geometry(world, entities[i], colliders[i], &whole) ||
+        !math::aabb_intersects(swept, whole.worldAabb)) {
       continue;
     }
-    float t = 0.0F;
-    if (!sweep_convex_geometry(query, direction, distance, shape, &t)) {
-      continue;
-    }
-    // A surface already touched blocks only a move into it: walking along
-    // the floor, or away from a wall, is free.
-    if (t <= kTouchTravel) {
-      Contact touching{};
-      if (measure_contact(capsule, shape, &touching) &&
-          (math::dot(direction, touching.normal) >= -kParallelCosine)) {
-        continue;
-      }
-    }
-    // Earliest first; equal times go to the lower entity index.
-    if (!found || (t < bestT) ||
-        ((t == bestT) && (entities[i].index < bestEntity.index))) {
-      found = true;
-      bestT = t;
-      bestEntity = entities[i];
-      bestShape = shape;
-    }
+    for_each_shape_piece(
+        whole, swept, [&](const ColliderWorldGeometry &shape) noexcept {
+          float t = 0.0F;
+          if (!math::aabb_intersects(swept, shape.worldAabb) ||
+              !sweep_convex_geometry(query, direction, distance, shape, &t)) {
+            return true;
+          }
+          // A surface already touched blocks only a move into it: walking
+          // along the floor, or away from a wall, is free.
+          if (t <= kTouchTravel) {
+            Contact touching{};
+            if (measure_contact(capsule, shape, &touching) &&
+                (math::dot(direction, touching.normal) >= -kParallelCosine)) {
+              return true;
+            }
+          }
+          // Earliest first; equal times go to the lower entity index, and
+          // within one mesh to the lower triangle, visited first.
+          if (!found || (t < bestT) ||
+              ((t == bestT) && (entities[i].index < bestEntity.index))) {
+            found = true;
+            bestT = t;
+            bestEntity = entities[i];
+            bestShape = shape;
+          }
+          return true;
+        });
   }
   if (!found) {
     return false;

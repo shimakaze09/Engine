@@ -49,6 +49,30 @@ math::Vec3 support_world_triangle(const void *data,
   return triangle->v[best];
 }
 
+bool tri_mesh_piece(const ColliderWorldGeometry &meshGeometry,
+                    std::uint32_t triangle,
+                    ColliderWorldGeometry *outPiece) noexcept {
+  WorldTriangle corners{};
+  if ((outPiece == nullptr) ||
+      !world_triangle(meshGeometry, triangle, &corners)) {
+    return false;
+  }
+  *outPiece = meshGeometry;
+  outPiece->triangle = triangle;
+  outPiece->center = corners.center;
+  outPiece->worldAabb = math::AABB{corners.v[0], corners.v[0]};
+  for (std::size_t k = 1U; k < 3U; ++k) {
+    math::AABB &box = outPiece->worldAabb;
+    box.min = math::Vec3(std::min(box.min.x, corners.v[k].x),
+                         std::min(box.min.y, corners.v[k].y),
+                         std::min(box.min.z, corners.v[k].z));
+    box.max = math::Vec3(std::max(box.max.x, corners.v[k].x),
+                         std::max(box.max.y, corners.v[k].y),
+                         std::max(box.max.z, corners.v[k].z));
+  }
+  return true;
+}
+
 math::AABB world_box_into_mesh(const ColliderWorldGeometry &meshGeometry,
                                const math::AABB &box) noexcept {
   math::AABB local{};

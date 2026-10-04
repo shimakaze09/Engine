@@ -41,4 +41,39 @@ math::AABB world_box_into_mesh(const ColliderWorldGeometry &meshGeometry,
 /// this many keeps the lowest-numbered ones.
 inline constexpr std::size_t kMaxTriMeshCandidates = 256U;
 
+/// `meshGeometry` narrowed to its triangle `triangle`: a convex piece with
+/// that triangle's support, world bounds and centroid. False for a
+/// triangle with no area or one the mesh does not have.
+bool tri_mesh_piece(const ColliderWorldGeometry &meshGeometry,
+                    std::uint32_t triangle,
+                    ColliderWorldGeometry *outPiece) noexcept;
+
+/// Calls `visit(piece)` for each convex piece of `shape` that may meet the
+/// world box `worldBox`: the shape itself, or for a whole TriMesh each of
+/// its triangles there, lowest first (at most kMaxTriMeshCandidates).
+/// Stops when `visit` returns false. Every query that tests a collider
+/// with GJK goes through this, so a mesh is met by its triangles and
+/// never by its bounds.
+template <typename Visit>
+void for_each_shape_piece(const ColliderWorldGeometry &shape,
+                          const math::AABB &worldBox, Visit visit) noexcept {
+  if ((shape.shape != math::ColliderShape::TriMesh) ||
+      (shape.triangle != kWholeShape) || (shape.triMesh == nullptr)) {
+    static_cast<void>(visit(shape));
+    return;
+  }
+  std::uint32_t triangles[kMaxTriMeshCandidates] = {};
+  const std::size_t found = collect_tri_mesh_triangles(
+      *shape.triMesh, world_box_into_mesh(shape, worldBox), triangles,
+      kMaxTriMeshCandidates);
+  const std::size_t count =
+      (found < kMaxTriMeshCandidates) ? found : kMaxTriMeshCandidates;
+  ColliderWorldGeometry piece{};
+  for (std::size_t i = 0U; i < count; ++i) {
+    if (tri_mesh_piece(shape, triangles[i], &piece) && !visit(piece)) {
+      return;
+    }
+  }
+}
+
 } // namespace engine::physics
