@@ -15,10 +15,12 @@ engine_add_module_library(engine_physics
     src/constraint_solver.cpp
     src/contact_manifold.cpp
     src/narrow_phase.cpp
+    src/narrow_phase_tri_mesh.cpp
     src/physics_query.cpp
     src/character_move.cpp
     src/primitive_hulls.cpp
     src/tri_mesh.cpp
+    src/tri_mesh_world.cpp
     src/joints/distance_joint.cpp
     src/joints/hinge_joint.cpp
     src/joints/ball_joint.cpp

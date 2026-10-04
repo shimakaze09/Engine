@@ -51,12 +51,9 @@ bool collider_geometry(const PhysicsWorldView &world, Entity entity,
   if (!world.get_physics_transform(entity, &worldTransform)) {
     return false;
   }
-  const ConvexHullData *hull = nullptr;
-  if (collider.shape == ColliderShape::ConvexHull) {
-    hull = get_hull_data_ptr(world.physics_context(), entity);
-  }
-  return make_collider_world_geometry(collider, worldTransform.matrix, hull,
-                                      outGeometry);
+  return make_installed_collider_geometry(world.physics_context(), entity,
+                                          collider, worldTransform.matrix,
+                                          outGeometry);
 }
 
 // Swept sphere vs AABB: expands the box by the radius and raycasts,

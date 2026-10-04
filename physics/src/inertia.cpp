@@ -67,6 +67,11 @@ void shape_unit_inertia(const math::Collider &collider, math::Vec3 *outInertia,
     *outVolume = volume;
     return;
   }
+  case math::ColliderShape::TriMesh:
+    // A triangle mesh has no volume, so no mass and no inertia.
+    *outInertia = math::Vec3(0.0F, 0.0F, 0.0F);
+    *outVolume = 0.0F;
+    return;
   case math::ColliderShape::AABB:
   case math::ColliderShape::ConvexHull:
   case math::ColliderShape::Heightfield:

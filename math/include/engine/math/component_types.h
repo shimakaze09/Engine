@@ -5,6 +5,7 @@
 // Shared component POD types used across engine modules.
 // Lives in math because Transform, RigidBody, Collider depend on Vec3/Quat.
 
+#include "engine/core/asset_identity.h"
 #include "engine/core/entity.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
@@ -125,6 +126,9 @@ enum class ColliderShape : std::uint8_t {
   Capsule = 2,
   ConvexHull = 3,
   Heightfield = 4,
+  /// The triangles of a mesh asset (Collider::meshRef): static geometry
+  /// only, since a triangle mesh has no volume to give a body mass.
+  TriMesh = 5,
 };
 
 /// Provenance of a ConvexHull collider's payload: which canonical primitive
@@ -167,6 +171,9 @@ struct Collider final {
   std::uint32_t collisionMask = 0xFFFFFFFFU;
   ColliderShape shape = ColliderShape::AABB;
   HullSource hullSource = HullSource::None;
+  /// The mesh asset a TriMesh collider collides with; nil for every other
+  /// shape.
+  core::AssetRef meshRef{};
   /// A trigger reports overlaps instead of colliding: no contact response,
   /// no collision event, no CCD stop, no part in its body's mass
   /// properties, and physics queries pass through it. Physics reports when

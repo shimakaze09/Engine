@@ -1,5 +1,6 @@
 // Implements physics cvar registration, PhysicsContext lifetime, and the
-// World-owned collider shape payloads (convex hulls and heightfields).
+// World-owned collider shape payloads (convex hulls, heightfields and
+// triangle meshes).
 
 #include "engine/physics/physics.h"
 
@@ -7,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <utility>
 
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
@@ -398,9 +400,90 @@ const ConvexHullData *get_convex_hull_data(const PhysicsContext &context,
   return find_hull_data(context, entity);
 }
 
+namespace {
+
+/// Drops the entity's TriMesh reference; the mesh itself goes with its
+/// last reference.
+void remove_tri_mesh_data(PhysicsContext &context, Entity entity) noexcept {
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if (store == nullptr) {
+    return;
+  }
+  for (std::size_t i = 0U; i < store->triMeshCount; ++i) {
+    if (store->triMeshEntity[i] == entity) {
+      const std::size_t last = store->triMeshCount - 1U;
+      if (i != last) {
+        store->triMeshData[i] = std::move(store->triMeshData[last]);
+        store->triMeshEntity[i] = store->triMeshEntity[last];
+      }
+      store->triMeshData[last].reset();
+      store->triMeshEntity[last] = kInvalidEntity;
+      --store->triMeshCount;
+      return;
+    }
+  }
+}
+
+} // namespace
+
+const TriMeshData *find_tri_mesh_data(const PhysicsContext &context,
+                                      Entity entity) noexcept {
+  const PhysicsShapeStore *store = context.shapeStore.get();
+  if (store == nullptr) {
+    return nullptr;
+  }
+  for (std::size_t i = 0U; i < store->triMeshCount; ++i) {
+    if (store->triMeshEntity[i] == entity) {
+      return store->triMeshData[i].get();
+    }
+  }
+  return nullptr;
+}
+
+bool set_tri_mesh_data(PhysicsContext &context, Entity entity,
+                       const TriMeshRef &mesh) noexcept {
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if ((store == nullptr) || !mesh) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < store->triMeshCount; ++i) {
+    if (store->triMeshEntity[i] == entity) {
+      store->triMeshData[i] = mesh;
+      return true;
+    }
+  }
+  if (store->triMeshCount >= kMaxTriMeshColliders) {
+    return false;
+  }
+  store->triMeshEntity[store->triMeshCount] = entity;
+  store->triMeshData[store->triMeshCount] = mesh;
+  ++store->triMeshCount;
+  return true;
+}
+
+const TriMeshData *get_tri_mesh_data(const PhysicsContext &context,
+                                     Entity entity) noexcept {
+  return find_tri_mesh_data(context, entity);
+}
+
+bool make_installed_collider_geometry(
+    const PhysicsContext &context, Entity entity, const Collider &collider,
+    const math::Mat4 &worldMatrix,
+    ColliderWorldGeometry *outGeometry) noexcept {
+  const ConvexHullData *hull = (collider.shape == ColliderShape::ConvexHull)
+                                   ? find_hull_data(context, entity)
+                                   : nullptr;
+  const TriMeshData *mesh = (collider.shape == ColliderShape::TriMesh)
+                                ? find_tri_mesh_data(context, entity)
+                                : nullptr;
+  return make_collider_world_geometry(collider, worldMatrix, hull, outGeometry,
+                                      mesh);
+}
+
 void remove_shape_payloads(PhysicsContext &context, Entity entity) noexcept {
   remove_hull_data(context, entity);
   remove_heightfield_data(context, entity);
+  remove_tri_mesh_data(context, entity);
 }
 
 void prune_incompatible_shape_payloads(PhysicsContext &context, Entity entity,
@@ -410,6 +493,9 @@ void prune_incompatible_shape_payloads(PhysicsContext &context, Entity entity,
   }
   if (shape != ColliderShape::Heightfield) {
     remove_heightfield_data(context, entity);
+  }
+  if (shape != ColliderShape::TriMesh) {
+    remove_tri_mesh_data(context, entity);
   }
 }
 
@@ -432,11 +518,5 @@ const HeightfieldData *get_heightfield_data(const PhysicsContext &context,
                                             Entity entity) noexcept {
   return find_heightfield_data(context, entity);
 }
-
-const ConvexHullData *get_hull_data_ptr(const PhysicsContext &context,
-                                        Entity entity) noexcept {
-  return find_hull_data(context, entity);
-}
-
 
 } // namespace engine::physics

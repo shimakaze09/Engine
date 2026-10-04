@@ -93,13 +93,9 @@ bool entity_collider_world_box(const runtime::World &world,
   if ((collider == nullptr) || (worldTransform == nullptr)) {
     return false;
   }
-  const physics::ConvexHullData *hull =
-      (collider->shape == runtime::ColliderShape::ConvexHull)
-          ? runtime::get_convex_hull_data(world, entity)
-          : nullptr;
   physics::ColliderWorldGeometry geometry{};
-  if (!physics::make_collider_world_geometry(*collider, worldTransform->matrix,
-                                             hull, &geometry)) {
+  if (!runtime::collider_world_geometry(world, entity, *collider,
+                                        worldTransform->matrix, &geometry)) {
     return false;
   }
   *outCenter = math::aabb_center(geometry.worldAabb);

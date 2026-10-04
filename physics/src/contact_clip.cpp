@@ -211,6 +211,7 @@ bool extract_face(const ColliderWorldGeometry &geometry,
   case math::ColliderShape::Sphere:
   case math::ColliderShape::Capsule:
   case math::ColliderShape::Heightfield:
+  case math::ColliderShape::TriMesh:
     return false;
   }
   if (ok) {

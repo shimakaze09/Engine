@@ -224,5 +224,8 @@ HeightfieldData *find_heightfield_data(PhysicsContext &context,
 /// Const overload of find_heightfield_data.
 const HeightfieldData *find_heightfield_data(const PhysicsContext &context,
                                              Entity entity) noexcept;
+/// Entity's TriMesh, or nullptr when none is installed.
+const TriMeshData *find_tri_mesh_data(const PhysicsContext &context,
+                                      Entity entity) noexcept;
 
 } // namespace engine::physics
