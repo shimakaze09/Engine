@@ -34,3 +34,4 @@ history.
 | [0019](0019-the-simulation-owns-time-and-randomness.md) | The simulation owns its time and its randomness | 2026-09-22 |
 | [0020](0020-issues-are-classified-before-they-are-worked.md) | Every issue is classified blocker, deferred or feature, and worked in that order | 2026-09-25 |
 | [0021](0021-the-music-file-cap-is-advisory.md) | The streamed-music file cap is advisory | 2026-09-26 |
+| [0022](0022-the-engine-patches-bgfx-locally.md) | The engine patches bgfx locally, at configure time | 2026-10-04 |
