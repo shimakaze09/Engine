@@ -1765,6 +1765,14 @@ engine_add_test_executable(engine_unit_nav_mesh_surface
     engine_navigation
 )
 
+engine_add_test_executable(engine_unit_nav_mesh_surface_file
+    SOURCES
+    nav_mesh_surface_file_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_navigation
+)
+
 engine_add_test_executable(engine_unit_nav_agent
     SOURCES
     nav_agent_test.cpp

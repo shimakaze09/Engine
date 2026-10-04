@@ -12,8 +12,16 @@
 // any document reports a finding, so CI catches a dangling reference
 // before an author does. Given --project, it opens the project through
 // engine::open_project and validates every scene the project lists.
+//
+// With --bake-navmesh each loaded scene's NavMeshSurfaces are baked and
+// written to their .navmesh files through the editor's own bake path
+// (runtime::write_nav_mesh_surface_file), so a build bakes what the
+// editor's Bake button would; with --check-navmesh each file must hold
+// exactly what that bake writes now, so a build refuses a mesh its level
+// has moved away from.
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -31,6 +39,7 @@
 #include "engine/renderer/material_loader.h"
 #include "engine/runtime/animation_system.h"
 #include "engine/runtime/content_catalog.h"
+#include "engine/runtime/nav_mesh_surface_file.h"
 #include "engine/runtime/prefab_serializer.h"
 #include "engine/runtime/reflect_types.h"
 #include "engine/runtime/scene_serializer.h"
@@ -41,13 +50,118 @@ namespace {
 constexpr engine::core::CommandLineOption kOptions[] = {
     {"assets", engine::core::CommandLineOptionKind::Value},
     {"project", engine::core::CommandLineOptionKind::Value},
+    {"bake-navmesh", engine::core::CommandLineOptionKind::Flag},
+    {"check-navmesh", engine::core::CommandLineOptionKind::Flag},
 };
+
+/// What a run does with each scene's navigation surfaces.
+enum class NavMeshMode : std::uint8_t { None, Bake, Check };
 
 void print_usage() {
   std::fprintf(stderr,
-               "usage: engine_validate [--assets <dir>] <scene.json>...\n"
-               "       engine_validate --project <dir or .project> "
-               "[<scene.json>...]\n");
+               "usage: engine_validate [--bake-navmesh | --check-navmesh] "
+               "[--assets <dir>] <scene.json>...\n"
+               "       engine_validate [--bake-navmesh | --check-navmesh] "
+               "--project <dir or .project> [<scene.json>...]\n");
+}
+
+const char *nav_mesh_write_text(engine::runtime::NavMeshWriteResult result) {
+  using engine::runtime::NavMeshWriteResult;
+  switch (result) {
+  case NavMeshWriteResult::Written:
+    return "written";
+  case NavMeshWriteResult::BadPath:
+    return "its path does not end in .navmesh";
+  case NavMeshWriteResult::BakeFailed:
+    return "the bake failed";
+  case NavMeshWriteResult::Empty:
+    return "nothing walkable inside the volume; nothing was written";
+  case NavMeshWriteResult::EncodeFailed:
+    return "the baked mesh could not be encoded";
+  case NavMeshWriteResult::WriteFailed:
+    return "the file could not be written; the previous file is kept";
+  }
+  return "unknown";
+}
+
+const char *nav_mesh_state_text(engine::runtime::NavMeshFileState state) {
+  using engine::runtime::NavMeshFileState;
+  switch (state) {
+  case NavMeshFileState::Current:
+    return "current";
+  case NavMeshFileState::Missing:
+    return "missing: bake the surface to write it";
+  case NavMeshFileState::Stale:
+    return "stale: the level or the surface changed since it was baked";
+  case NavMeshFileState::Unreadable:
+    return "unreadable";
+  case NavMeshFileState::BadPath:
+    return "its path does not end in .navmesh";
+  case NavMeshFileState::BakeFailed:
+    return "the bake failed or found nothing walkable";
+  }
+  return "unknown";
+}
+
+/// Bakes, or checks, every NavMeshSurface of the scene loaded in `world`,
+/// printing one line per surface; returns the surfaces that failed. A
+/// surface never baked has no path to write to, and this tool never edits
+/// the scene to give it one, so that is a finding too.
+int process_nav_mesh_surfaces(engine::runtime::World &world, const char *scene,
+                              NavMeshMode mode) {
+  // The bake places each surface at its entity's composed position, as
+  // the editor's World has it: one transform phase composes them, and the
+  // World is back in Input for the next scene.
+  world.begin_transform_phase();
+  world.end_frame_phase();
+  int failures = 0;
+  const std::size_t count = world.nav_mesh_surface_count();
+  for (std::size_t i = 0U; i < count; ++i) {
+    const engine::runtime::Entity entity = world.nav_mesh_surface_entity_at(i);
+    const engine::runtime::NavMeshSurfaceComponent *surface =
+        world.nav_mesh_surface_at(i);
+    if (surface == nullptr) {
+      continue;
+    }
+    const unsigned long long id =
+        static_cast<unsigned long long>(world.persistent_id(entity));
+    if (surface->navMeshPath[0] == '\0') {
+      std::printf("%s: error: nav_mesh_never_baked (entity %llu): bake it "
+                  "in the editor once to name its file\n",
+                  scene, id);
+      ++failures;
+      continue;
+    }
+    if (mode == NavMeshMode::Bake) {
+      const engine::runtime::NavMeshWriteReport report =
+          engine::runtime::write_nav_mesh_surface_file(world, entity,
+                                                       surface->navMeshPath);
+      const bool written =
+          report.result == engine::runtime::NavMeshWriteResult::Written;
+      if (written) {
+        std::printf("%s: baked %zu polygons into %s (entity %llu)%s\n", scene,
+                    report.polygons, surface->navMeshPath, id,
+                    report.identified ? ""
+                                      : "; its sidecar could not be written");
+      } else {
+        std::printf("%s: error: nav_mesh_not_baked %s (entity %llu): %s\n",
+                    scene, surface->navMeshPath, id,
+                    nav_mesh_write_text(report.result));
+      }
+      failures += (written && report.identified) ? 0 : 1;
+    } else {
+      const engine::runtime::NavMeshFileState state =
+          engine::runtime::check_nav_mesh_surface_file(world, entity,
+                                                       surface->navMeshPath);
+      const bool current = state == engine::runtime::NavMeshFileState::Current;
+      std::printf("%s: %s%s %s (entity %llu): %s\n", scene,
+                  current ? "" : "error: ",
+                  current ? "nav_mesh_current" : "nav_mesh_out_of_date",
+                  surface->navMeshPath, id, nav_mesh_state_text(state));
+      failures += current ? 0 : 1;
+    }
+  }
+  return failures;
 }
 
 /// Loads one scene, checks its asset references against `catalog` and
@@ -57,15 +171,24 @@ void print_usage() {
 /// must fix.
 int validate_scene(engine::runtime::World &world,
                    const engine::content::AssetCatalog &catalog,
-                   const char *path) {
+                   const char *path, NavMeshMode navMeshMode) {
   engine::core::ValidationReport report{};
   if (!engine::runtime::load_scene(world, path, nullptr, &report)) {
     std::printf("%s: error: scene did not load\n", path);
     return 1;
   }
   engine::runtime::validate_scene_asset_references(world, catalog, &report);
+  std::size_t skipped = 0U;
   for (std::size_t i = 0U; i < report.count; ++i) {
     const engine::core::ValidationEntry &entry = report.entries[i];
+    // A bake writes the files this names; whether it did is reported per
+    // surface below, so the load's note that they are missing is not a
+    // finding of its own.
+    if ((navMeshMode == NavMeshMode::Bake) &&
+        (std::strcmp(entry.code, "missing_nav_mesh") == 0)) {
+      ++skipped;
+      continue;
+    }
     std::printf("%s: %s: %s %s (entity %u)\n", path,
                 (entry.severity == engine::core::ValidationSeverity::Error)
                     ? "error"
@@ -76,9 +199,13 @@ int validate_scene(engine::runtime::World &world,
     std::printf("%s: warning: %zu further finding(s) not listed\n", path,
                 report.dropped);
   }
-  const std::size_t findings = report.count + report.dropped;
+  const std::size_t findings = report.count + report.dropped - skipped;
   std::printf("%s: %zu finding(s)\n", path, findings);
-  return static_cast<int>(findings);
+  const int navMeshFailures =
+      (navMeshMode == NavMeshMode::None)
+          ? 0
+          : process_nav_mesh_surfaces(world, path, navMeshMode);
+  return static_cast<int>(findings) + navMeshFailures;
 }
 
 /// The first Error a loader logs while one document is checked: why it did
@@ -235,10 +362,15 @@ int main(int argc, char **argv) {
   }
   const bool byProject = commandLine->has("project");
   if ((byProject && commandLine->has("assets")) ||
-      (!byProject && (commandLine->positional_count() == 0U))) {
+      (!byProject && (commandLine->positional_count() == 0U)) ||
+      (commandLine->has("bake-navmesh") && commandLine->has("check-navmesh"))) {
     print_usage();
     return 2;
   }
+  const NavMeshMode navMeshMode =
+      commandLine->has("bake-navmesh")    ? NavMeshMode::Bake
+      : commandLine->has("check-navmesh") ? NavMeshMode::Check
+                                          : NavMeshMode::None;
   const char *assetsDirectory =
       commandLine->has("assets") ? commandLine->value("assets") : "assets";
   // Static: about 18 KB, and it must outlive the mount that points at it.
@@ -316,11 +448,12 @@ int main(int argc, char **argv) {
       char osPath[engine::kProjectOsPathCapacity * 2U] = {};
       std::snprintf(osPath, sizeof(osPath), "%s/%s", project.contentRoot,
                     project.document.scenes[i] + mountLength);
-      failures += validate_scene(*world, *catalog, osPath);
+      failures += validate_scene(*world, *catalog, osPath, navMeshMode);
     }
   }
   for (std::size_t i = 0U; i < commandLine->positional_count(); ++i) {
-    failures += validate_scene(*world, *catalog, commandLine->positional(i));
+    failures += validate_scene(*world, *catalog, commandLine->positional(i),
+                               navMeshMode);
   }
   failures += validate_catalogued_documents(*world, *catalog);
 
