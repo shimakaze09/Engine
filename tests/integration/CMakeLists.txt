@@ -1002,6 +1002,15 @@ engine_add_test_executable(engine_integration_script_moved_bodies
     integration
 )
 
+engine_add_test_executable(engine_integration_tri_mesh_pipeline
+    SOURCES
+    tri_mesh_pipeline_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_ecs_stress_50k
     SOURCES
     ecs_stress_50k.cpp
