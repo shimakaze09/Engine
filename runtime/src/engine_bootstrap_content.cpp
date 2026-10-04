@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "engine/content/asset_catalog.h"
+#include "engine/content/asset_references.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/engine.h"
@@ -284,6 +285,11 @@ bool runtime::catalogue_engine_content(content::AssetCatalog *catalog,
              catalog, static_cast<content::BuiltinMesh>(i)) &&
          ok;
   }
+  // Once everything a document may name is catalogued (a scene names a
+  // package's assets and the built-in meshes too), the documents' own
+  // references become the catalog's edges. A document that will not read
+  // is logged and indexed with none; loading it reports it in full.
+  static_cast<void>(content::index_catalogued_documents(catalog));
   return ok;
 }
 

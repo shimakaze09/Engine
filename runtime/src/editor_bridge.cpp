@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "engine/content/asset_catalog.h"
+#include "engine/content/asset_references.h"
 #include "engine/content/asset_sidecar.h"
 #include "engine/content/asset_streaming.h"
 #include "engine/content/asset_type_table.h"
@@ -31,6 +32,35 @@ namespace {
 const EditorBridge *g_editorBridge = nullptr;
 EngineAssetDatabaseService *g_editorAssetService = nullptr;
 const renderer::GpuMeshRegistry *g_editorMeshRegistry = nullptr;
+
+/// The catalog's virtual path for the file at `osPath` under the project's
+/// asset root: "<mount>/<path relative to the root>", '/'-separated. False
+/// when it does not fit `capacity`.
+bool catalog_virtual_path(const char *osPath, char *out,
+                          std::size_t capacity) noexcept {
+  const char *root = active_config().assetRoot;
+  const char *mount = active_config().assetMount;
+  const std::size_t rootLength = std::strlen(root);
+  // The path is under the asset root (the caller's jail check proved it),
+  // so the mount-relative spelling is what the catalog keys on.
+  const char *relative = osPath;
+  if ((rootLength > 0U) && (std::strncmp(osPath, root, rootLength) == 0)) {
+    relative = osPath + rootLength;
+    while ((*relative == '/') || (*relative == '\\')) {
+      ++relative;
+    }
+  }
+  const int written = std::snprintf(out, capacity, "%s/%s", mount, relative);
+  if ((written <= 0) || (static_cast<std::size_t>(written) >= capacity)) {
+    return false;
+  }
+  for (std::size_t i = 0U; out[i] != '\0'; ++i) {
+    if (out[i] == '\\') {
+      out[i] = '/';
+    }
+  }
+  return true;
+}
 
 } // namespace
 
@@ -338,10 +368,17 @@ bool editor_save_material(const char *virtualPath,
       renderer::find_material_texture_slots(g_editorAssetService->database,
                                             materialId);
   const renderer::MaterialTextureSlots emptySlots{};
-  return renderer::save_material_asset(
+  const bool saved = renderer::save_material_asset(
       g_editorAssetService->catalog, virtualPath, *params,
       (slots != nullptr) ? *slots : emptySlots, parentVirtualPath,
       renderer::material_overrides(g_editorAssetService->database, materialId));
+  if (saved) {
+    // The catalog's record of what the material references follows the
+    // file the author just wrote.
+    static_cast<void>(content::index_document_references(
+        g_editorAssetService->catalog, materialId));
+  }
+  return saved;
 }
 
 bool editor_create_material(const char *virtualPath) noexcept {
@@ -411,40 +448,32 @@ editor_establish_asset_identity(const char *osPath) noexcept {
   // Catalogue it under the identity just minted. Without this the asset
   // is referenceable only after a restart re-walks the mount, which for
   // something the author just created reads as the save having failed.
+  char virtualPath[520] = {};
   if ((g_editorAssetService != nullptr) &&
-      (g_editorAssetService->catalog != nullptr)) {
-    const char *root = active_config().assetRoot;
-    const char *mount = active_config().assetMount;
-    const std::size_t rootLength = std::strlen(root);
-    // The path is under the asset root (the caller's jail check proved
-    // it), so the mount-relative spelling is what the catalog keys on.
-    const char *relative = osPath;
-    if ((rootLength > 0U) && (std::strncmp(osPath, root, rootLength) == 0)) {
-      relative = osPath + rootLength;
-      while ((*relative == '/') || (*relative == '\\')) {
-        ++relative;
-      }
-    }
-    char virtualPath[520] = {};
-    const int written = std::snprintf(virtualPath, sizeof(virtualPath),
-                                      "%s/%s", mount, relative);
-    if ((written > 0) &&
-        (static_cast<std::size_t>(written) < sizeof(virtualPath))) {
-      for (char &c : virtualPath) {
-        if (c == '\\') {
-          c = '/';
-        }
-      }
-      content::AssetMetadata metadata{};
-      metadata.assetId = content::make_asset_id_from_path(virtualPath);
-      metadata.typeTag = content::classify_asset_path(virtualPath).tag;
-      metadata.ref = content::asset_ref_primary(sidecar.guid);
-      content::write_metadata_path(&metadata.filePath, virtualPath);
-      static_cast<void>(content::register_asset_metadata(
-          g_editorAssetService->catalog, metadata));
-    }
+      (g_editorAssetService->catalog != nullptr) &&
+      catalog_virtual_path(osPath, virtualPath, sizeof(virtualPath))) {
+    content::AssetMetadata metadata{};
+    metadata.assetId = content::make_asset_id_from_path(virtualPath);
+    metadata.typeTag = content::classify_asset_path(virtualPath).tag;
+    metadata.ref = content::asset_ref_primary(sidecar.guid);
+    content::write_metadata_path(&metadata.filePath, virtualPath);
+    static_cast<void>(content::register_asset_metadata(
+        g_editorAssetService->catalog, metadata));
   }
   return EditorIdentityResult::Created;
+}
+
+void editor_index_document_references(const char *osPath) noexcept {
+  char virtualPath[520] = {};
+  if ((osPath == nullptr) || (osPath[0] == '\0') ||
+      (g_editorAssetService == nullptr) ||
+      (g_editorAssetService->catalog == nullptr) ||
+      !catalog_virtual_path(osPath, virtualPath, sizeof(virtualPath))) {
+    return;
+  }
+  static_cast<void>(content::index_document_references(
+      g_editorAssetService->catalog,
+      content::make_asset_id_from_path(virtualPath)));
 }
 
 } // namespace engine::runtime

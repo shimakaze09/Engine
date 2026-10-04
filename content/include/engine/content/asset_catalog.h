@@ -29,6 +29,13 @@ namespace engine::content {
 /// a tag or dependency the record did not already carry, a recorded
 /// reload, a clear — and never on a refused one, so a consumer that noted
 /// it can tell the catalog changed since.
+/// One document-to-asset reference the catalog has indexed
+/// (asset_references.h): `document` names `target`.
+struct AssetReferenceEdge final {
+  AssetId document = kInvalidAssetId;
+  AssetId target = kInvalidAssetId;
+};
+
 struct AssetCatalog final {
   /// The most records any catalog can hold; `recordLimit` may lower it.
   static constexpr std::size_t kMaxRecords = std::size_t{1} << 20U;
@@ -48,6 +55,11 @@ struct AssetCatalog final {
   std::size_t recordCount = 0U;
   std::uint32_t *index = nullptr;
   std::size_t indexCapacity = 0U;
+  // Document references, owned by asset_references.cpp: every edge the
+  // indexed documents make, grouped by nothing, scanned whole by a query.
+  AssetReferenceEdge *references = nullptr;
+  std::size_t referenceCount = 0U;
+  std::size_t referenceCapacity = 0U;
 
   AssetCatalog() noexcept = default;
   AssetCatalog(const AssetCatalog &) = delete;
@@ -171,13 +183,15 @@ std::size_t get_dependencies(const AssetCatalog *catalog, AssetId id,
 bool add_asset_dependency(AssetCatalog *catalog, AssetId id,
                           AssetId depId) noexcept;
 
-/// Copies up to maxIds ids of the catalogued assets that record a direct
-/// dependency on `id` into outIds and returns how many there are, which
-/// may exceed maxIds. The catalog stores edges forward only, so this scans
-/// every record's dependency list: at most the record count x
-/// AssetMetadata::kMaxDependencies comparisons, for a change or an edit,
-/// never per frame. Scanning keeps the answer exact with no second index
-/// to fall out of step and no cap on how many assets share a dependency.
+/// Copies up to maxIds ids of the catalogued assets that depend directly
+/// on `id` into outIds and returns how many there are, which may exceed
+/// maxIds. An asset depends on `id` when its dependency list records it or,
+/// for a document, when the document references it (asset_references.h);
+/// each dependent counts once. The catalog stores edges forward only, so
+/// this scans every record's list and the reference table, for a change or
+/// an edit, never per frame. Scanning keeps the answer exact with no second
+/// index to fall out of step and no cap on how many assets share a
+/// dependency.
 std::size_t find_asset_dependents(const AssetCatalog *catalog, AssetId id,
                                   AssetId *outIds, std::size_t maxIds) noexcept;
 
@@ -187,8 +201,9 @@ std::size_t find_asset_dependents(const AssetCatalog *catalog, AssetId id,
 using AssetChangeVisitor = void (*)(AssetId dependent, AssetId cause,
                                     void *userData);
 
-/// Tells everything that depends on `changed`, directly or through other
-/// assets, that it changed: calls `visit` once per catalogued dependent,
+/// Tells everything that depends on `changed` (as find_asset_dependents
+/// counts a dependent), directly or through other assets, that it changed:
+/// calls `visit` once per catalogued dependent,
 /// breadth first, so a dependent is visited after the asset it was reached
 /// through. A dependent reached along several paths is visited once, and a
 /// cycle ends. `changed` itself need not be catalogued -- a file a cooked

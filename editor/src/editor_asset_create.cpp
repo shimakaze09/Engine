@@ -253,6 +253,7 @@ NewAssetResult create_new_asset(NewAssetKind kind, const char *folderOsPath,
       fs::remove(fs::path(result.osPath), ec);
       return refuse(NewAssetFailure::WriteFailed, name);
     }
+    runtime::editor_index_document_references(result.osPath);
   }
 
   static_cast<void>(rebuild_asset_index());

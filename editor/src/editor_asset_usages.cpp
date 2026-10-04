@@ -1,6 +1,7 @@
-// Implements Find Usages: the whole-string match of an asset's path or
-// AssetRef inside a JSON document, the search over the asset index, and
-// the window that lists the result.
+// Implements Find Usages: the match of an asset's path or AssetRef against
+// the references content::scan_document_references reads out of a JSON
+// document, the search over the asset index, and the window that lists the
+// result.
 
 #include "editor_asset_usages.h"
 
@@ -9,6 +10,7 @@
 #include "imgui.h"
 
 #include "engine/content/asset_identity.h"
+#include "engine/content/asset_references.h"
 #include "engine/core/file_read.h"
 #include "engine/core/logging.h"
 
@@ -22,26 +24,32 @@ namespace engine::editor {
 namespace {
 
 /// The most of one document a search reads; a larger file is skipped.
-constexpr std::size_t kMaxDocumentBytes = 4U * 1024U * 1024U;
+constexpr std::size_t kMaxDocumentBytes = content::kMaxReferencingDocumentBytes;
 
-char ascii_lower(char c) noexcept {
-  return ((c >= 'A') && (c <= 'Z')) ? static_cast<char>(c - 'A' + 'a') : c;
-}
+/// What a scan is looking for, and whether it found it.
+struct UsageMatch final {
+  const char *virtualPath = nullptr;
+  core::AssetRef ref{};
+  bool hasRef = false;
+  bool found = false;
+};
 
-/// True when the string starting just after an opening quote at `at` is
-/// exactly `value` (compared without case when `foldCase`), followed by
-/// the closing quote or, when `allowSubAsset`, by '#'.
-bool string_matches(const char *at, const char *value, bool foldCase,
-                    bool allowSubAsset) noexcept {
-  std::size_t i = 0U;
-  for (; value[i] != '\0'; ++i) {
-    const char a = foldCase ? ascii_lower(at[i]) : at[i];
-    const char b = foldCase ? ascii_lower(value[i]) : value[i];
-    if ((a == '\0') || (a != b)) {
-      return false;
-    }
+void match_reference(const content::DocumentReference &reference,
+                     void *userData) noexcept {
+  auto &match = *static_cast<UsageMatch *>(userData);
+  if (match.found) {
+    return;
   }
-  return (at[i] == '"') || (allowSubAsset && (at[i] == '#'));
+  if (reference.isRef) {
+    // A primary reference names the whole file, so any of its sub-assets
+    // is a usage too; a sub-asset reference is exact.
+    match.found = match.hasRef && (reference.ref.guid == match.ref.guid) &&
+                  ((match.ref.localId == 0U) ||
+                   (reference.ref.localId == match.ref.localId));
+    return;
+  }
+  match.found = (match.virtualPath != nullptr) &&
+                (std::strcmp(reference.text, match.virtualPath) == 0);
 }
 
 /// The last search, shown in the Find Usages window. Written only by an
@@ -78,37 +86,25 @@ void log_skipped(const char *path, const char *reason) noexcept {
 
 } // namespace
 
-bool asset_kind_references_assets(content::AssetTypeTag kind) noexcept {
-  return (kind == content::AssetTypeTag::Scene) ||
-         (kind == content::AssetTypeTag::Prefab) ||
-         (kind == content::AssetTypeTag::Material) ||
-         (kind == content::AssetTypeTag::AnimationController);
-}
-
 bool document_references_asset(const char *text, const char *virtualPath,
                                const core::AssetRef &ref) noexcept {
   if (text == nullptr) {
     return false;
   }
-  char refText[content::kAssetRefTextLength + 1U] = {};
-  const bool hasRef = core::asset_ref_is_valid(ref) &&
-                      content::format_asset_ref(ref, refText, sizeof(refText));
-  const bool hasPath = (virtualPath != nullptr) && (virtualPath[0] != '\0');
-  if (!hasRef && !hasPath) {
+  UsageMatch match{};
+  match.ref = ref;
+  match.hasRef = core::asset_ref_is_valid(ref);
+  match.virtualPath = ((virtualPath != nullptr) && (virtualPath[0] != '\0'))
+                          ? virtualPath
+                          : nullptr;
+  if (!match.hasRef && (match.virtualPath == nullptr)) {
     return false;
   }
-  // A primary reference names the whole file, so "<guid>#<id>" (one of
-  // its sub-assets) is a usage too; a sub-asset reference is exact.
-  const bool primary = (ref.localId == 0U);
-  for (const char *quote = std::strchr(text, '"'); quote != nullptr;
-       quote = std::strchr(quote + 1, '"')) {
-    const char *value = quote + 1;
-    if ((hasRef && string_matches(value, refText, true, primary)) ||
-        (hasPath && string_matches(value, virtualPath, false, false))) {
-      return true;
-    }
-  }
-  return false;
+  // The scanner the catalog's reference index uses, so the two agree on
+  // what a reference is: a whole JSON string value, never a key.
+  return content::scan_document_references(text, std::strlen(text),
+                                           &match_reference, &match) &&
+         match.found;
 }
 
 bool find_asset_usages(const AssetIndexEntry &target,
@@ -131,7 +127,8 @@ bool find_asset_usages(const AssetIndexEntry &target,
   const std::size_t count = asset_index_count();
   for (std::size_t i = 0U; i < count; ++i) {
     const AssetIndexEntry *entry = asset_index_entry(i);
-    if ((entry == nullptr) || !asset_kind_references_assets(entry->kind) ||
+    if ((entry == nullptr) ||
+        !content::asset_kind_references_assets(entry->kind) ||
         (std::strcmp(entry->osPath, target.osPath) == 0)) {
       continue;
     }

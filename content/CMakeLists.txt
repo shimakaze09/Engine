@@ -7,6 +7,7 @@ engine_add_module_library(engine_content
     src/asset_identity.cpp
     src/asset_provenance.cpp
     src/asset_ref_json.cpp
+    src/asset_references.cpp
     src/asset_sidecar.cpp
     src/import_settings_resolve.cpp
     src/project_document.cpp

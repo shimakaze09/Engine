@@ -395,6 +395,13 @@ engine_add_test_executable(engine_unit_asset_sidecar
     engine_content
 )
 
+engine_add_test_executable(engine_unit_asset_references
+    SOURCES
+    asset_references_test.cpp
+    PRIVATE_DEPS
+    engine_content
+)
+
 engine_add_test_executable(engine_unit_import_settings_resolve
     SOURCES
     import_settings_resolve_test.cpp
