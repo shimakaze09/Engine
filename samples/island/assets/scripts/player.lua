@@ -11,14 +11,19 @@
 -- 'self' is an opaque, generation-checked entity handle.
 local M = {}
 
-local MOVE_SPEED = 5.0
-local JUMP_VY = 7.0
-local GROUND_CHECK_DISTANCE = 0.65
+-- Each player's own values, shown in the Inspector and read with
+-- engine.get_property(self, name).
+M.properties = {
+    move_speed = { type = "float", default = 5.0, min = 0.0 },
+    jump_velocity = { type = "float", default = 7.0, min = 0.0 },
+    ground_check_distance = { type = "float", default = 0.65, min = 0.0 },
+}
 
 -- Reports whether a downward ray reaches supporting geometry.
 local function is_grounded(self, x, y, z)
     local hits = engine.raycast_all(
-        x, y, z, 0.0, -1.0, 0.0, GROUND_CHECK_DISTANCE)
+        x, y, z, 0.0, -1.0, 0.0,
+        engine.get_property(self, "ground_check_distance"))
     for i = 1, #hits do
         local hit = hits[i]
         if hit.entity ~= self and hit.ny > 0.5 then
@@ -86,13 +91,14 @@ function M.on_tick(self, _dt)
         move_x = move_x * inverse_length
         move_z = move_z * inverse_length
     end
-    local tx = move_x * MOVE_SPEED
-    local tz = move_z * MOVE_SPEED
+    local move_speed = engine.get_property(self, "move_speed")
+    local tx = move_x * move_speed
+    local tz = move_z * move_speed
 
     -- Space bar: jump only while supported by upward-facing geometry.
     if engine.is_key_pressed(engine.KEY_SPACE)
         and is_grounded(self, x, y, z) then
-        vy = JUMP_VY
+        vy = engine.get_property(self, "jump_velocity")
     end
 
     engine.set_velocity(self, tx, vy, tz)

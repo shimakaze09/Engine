@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "engine/core/hash.h"
 #include "engine/core/logging.h"
 #include "entity_handle.h"
 #include "entity_script_bindings.h"
@@ -32,10 +33,10 @@ constexpr std::size_t kMaxReportedProblems = 64U;
 std::uint64_t g_reported[kMaxReportedProblems] = {};
 std::size_t g_reportedCount = 0U;
 
-std::uint64_t fnv1a(std::uint64_t hash, const char *text) noexcept {
+/// Folds `text` into a running FNV-1a hash.
+std::uint64_t hash_append(std::uint64_t hash, const char *text) noexcept {
   for (const char *c = text; *c != '\0'; ++c) {
-    hash ^= static_cast<unsigned char>(*c);
-    hash *= 1099511628211ULL;
+    hash = core::fnv1a_64_append(hash, static_cast<std::uint8_t>(*c));
   }
   return hash;
 }
@@ -43,8 +44,10 @@ std::uint64_t fnv1a(std::uint64_t hash, const char *text) noexcept {
 /// Logs a Warning once per script, property and kind of problem.
 void report_once(const char *path, const char *name, const char *kind,
                  const char *message) noexcept {
-  std::uint64_t key = fnv1a(14695981039346656037ULL, path);
-  key = fnv1a(fnv1a(key ^ 0x2FU, name), kind);
+  // The separator keeps "ab"+"c" and "a"+"bc" apart.
+  std::uint64_t key = core::fnv1a_64(path);
+  key = hash_append(core::fnv1a_64_append(key, 0U), name);
+  key = hash_append(core::fnv1a_64_append(key, 0U), kind);
   for (std::size_t i = 0U; i < g_reportedCount; ++i) {
     if (g_reported[i] == key) {
       return;

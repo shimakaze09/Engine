@@ -9,9 +9,22 @@
 -- a reloaded chunk starts with nil handles.
 local M = {}
 
-local COIN_COUNT = 8
-local PICKUP_RADIUS = 0.9
-local GOAL_RADIUS = 1.6
+-- The controller's own values, shown in the Inspector: the level's rules
+-- and the names of the entities it plays with.
+M.properties = {
+    coin_count = { type = "integer", default = 8, min = 0,
+                   tooltip = "Coins to collect: entities named the coin prefix followed by 1, 2, 3 ..." },
+    coin_prefix = { type = "string", default = "Coin",
+                    tooltip = "Name of each coin before its number" },
+    pickup_radius = { type = "float", default = 0.9, min = 0.0,
+                      tooltip = "How close the player must come to collect a pickup" },
+    goal_name = { type = "string", default = "Goal",
+                  tooltip = "Name of the entity the player must reach" },
+    goal_radius = { type = "float", default = 1.6, min = 0.0,
+                    tooltip = "How close to the goal ends the run" },
+    player_name = { type = "string", default = "Player",
+                    tooltip = "Name of the player entity" },
+}
 
 local PRELOAD_MESHES = {
     "assets/props/tree_trunk.mesh", "assets/props/tree_canopy.mesh",
@@ -64,7 +77,8 @@ end
 
 -- Requests the bundled meshes, loads the effect sounds, and starts the
 -- ambient loop and the run timer.
-function M.on_begin_play(_self)
+function M.on_begin_play(self)
+    local coin_count = engine.get_property(self, "coin_count")
     for i = 1, #PRELOAD_MESHES do
         engine.load_asset_async(PRELOAD_MESHES[i], 2)
     end
@@ -77,10 +91,10 @@ function M.on_begin_play(_self)
     local saved = engine.load_data()
     if type(saved) == "table" and saved.best_time ~= nil then
         engine.log(string.format("Island Hopper - best time %.1fs. Collect %d coins, then reach the flag!",
-            saved.best_time, COIN_COUNT))
+            saved.best_time, coin_count))
     else
         engine.log(string.format("Island Hopper - collect %d coins, then reach the flag!",
-            COIN_COUNT))
+            coin_count))
     end
 end
 
@@ -93,7 +107,7 @@ end
 
 -- Collects one named pickup when the player is close enough; returns true
 -- when the entity was taken.
-local function try_pickup(name, px, py, pz, sound)
+local function try_pickup(name, px, py, pz, sound, radius)
     local e = engine.find_entity_by_name(name)
     if e == nil then
         return false
@@ -103,7 +117,7 @@ local function try_pickup(name, px, py, pz, sound)
         return false
     end
     local dx, dy, dz = x - px, y - py, z - pz
-    if dx * dx + dy * dy + dz * dz <= PICKUP_RADIUS * PICKUP_RADIUS then
+    if dx * dx + dy * dy + dz * dz <= radius * radius then
         play_at(sound, x, y, z, 0.9)
         engine.destroy_entity(e)
         return true
@@ -121,9 +135,9 @@ local function animate_pickup(name, angle)
 end
 
 -- Announces the win once: jingle, best-time bookkeeping, saved slot.
-local function finish_run()
+local function finish_run(player)
     g_won = true
-    local px, py, pz = engine.get_position(engine.find_entity_by_name("Player"))
+    local px, py, pz = engine.get_position(player)
     play_at(g_win_sound, px or 0.0, py or 0.0, pz or 0.0, 1.0)
 
     local total = g_time
@@ -144,14 +158,15 @@ local function finish_run()
 end
 
 -- Drives pickups, the splash-out call, and the goal check every step.
-function M.on_tick(_self, dt)
+function M.on_tick(self, dt)
     if g_won then
         return
     end
     g_time = g_time + dt
     g_spin = g_spin + dt * 2.5
 
-    local player = engine.find_entity_by_name("Player")
+    local player = engine.find_entity_by_name(
+        engine.get_property(self, "player_name"))
     if player == nil then
         return
     end
@@ -160,17 +175,20 @@ function M.on_tick(_self, dt)
         return
     end
 
-    for i = 1, COIN_COUNT do
-        local name = "Coin" .. i
+    local coin_count = engine.get_property(self, "coin_count")
+    local coin_prefix = engine.get_property(self, "coin_prefix")
+    local pickup_radius = engine.get_property(self, "pickup_radius")
+    for i = 1, coin_count do
+        local name = coin_prefix .. i
         animate_pickup(name, g_spin)
-        if try_pickup(name, px, py, pz, g_pickup_sound) then
+        if try_pickup(name, px, py, pz, g_pickup_sound, pickup_radius) then
             g_coins = g_coins + 1
-            engine.log(string.format("Coin %d/%d", g_coins, COIN_COUNT))
+            engine.log(string.format("Coin %d/%d", g_coins, coin_count))
         end
     end
     animate_pickup("Gem", g_spin * 1.4)
     if not g_gem_taken
-        and try_pickup("Gem", px, py, pz, g_pickup_sound) then
+        and try_pickup("Gem", px, py, pz, g_pickup_sound, pickup_radius) then
         g_gem_taken = true
         engine.log("Bonus gem collected!")
     end
@@ -182,14 +200,16 @@ function M.on_tick(_self, dt)
         g_splashed = false
     end
 
-    if g_coins >= COIN_COUNT then
-        local goal = engine.find_entity_by_name("Goal")
+    if g_coins >= coin_count then
+        local goal = engine.find_entity_by_name(
+            engine.get_property(self, "goal_name"))
         if goal ~= nil then
             local gx, gy, gz = engine.get_position(goal)
             if gx ~= nil then
                 local dx, dy, dz = gx - px, gy - py, gz - pz
-                if dx * dx + dy * dy + dz * dz <= GOAL_RADIUS * GOAL_RADIUS then
-                    finish_run()
+                local goal_radius = engine.get_property(self, "goal_radius")
+                if dx * dx + dy * dy + dz * dz <= goal_radius * goal_radius then
+                    finish_run(player)
                 end
             end
         end

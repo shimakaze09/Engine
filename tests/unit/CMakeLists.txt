@@ -600,6 +600,15 @@ engine_add_test_executable(engine_unit_script_property_scan
     engine_scripting
 )
 
+engine_add_test_executable(engine_unit_script_property_parity
+    SOURCES
+    script_property_parity_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    # Runs each script in a plain VM, the side of the parity it checks.
+    engine_lua
+)
+
 engine_add_test_executable(engine_unit_lua_error_diagnostic
     SOURCES
     lua_error_diagnostic_test.cpp

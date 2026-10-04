@@ -13,12 +13,20 @@
 -- re-acquired after a hot reload.
 local M = {}
 
-local MOVE_SPEED = 4.5
-local JUMP_VY = 6.5
-local GROUND_CHECK_DISTANCE = 0.35
+-- The player's own values, shown in the Inspector.
+M.properties = {
+    move_speed = { type = "float", default = 4.5, min = 0.0,
+                   tooltip = "Running speed, in metres per second" },
+    jump_velocity = { type = "float", default = 6.5, min = 0.0,
+                      tooltip = "Upward speed a jump starts with" },
+    ground_check_distance = { type = "float", default = 0.35, min = 0.0,
+                              tooltip = "How far below its base the player looks for ground" },
+    camera_back = { type = "float", default = 6.5,
+                    tooltip = "How far behind the player the camera follows" },
+    camera_up = { type = "float", default = 3.5,
+                  tooltip = "How far above the player the camera follows" },
+}
 local SPAWN = { x = 0.0, y = 0.15, z = 5.0 }
-local CAMERA_BACK = 6.5
-local CAMERA_UP = 3.5
 
 local g_instances = {}
 local g_footstep = nil
@@ -55,7 +63,8 @@ end
 -- airborne (the handle lets the controller ride moving ground).
 local function ground_entity(self, x, y, z)
     local hits = engine.raycast_all(
-        x, y + 0.25, z, 0.0, -1.0, 0.0, GROUND_CHECK_DISTANCE + 0.25)
+        x, y + 0.25, z, 0.0, -1.0, 0.0,
+        engine.get_property(self, "ground_check_distance") + 0.25)
     for i = 1, #hits do
         local hit = hits[i]
         if hit.entity ~= self and hit.ny > 0.5 then
@@ -74,7 +83,8 @@ local function follow_with_camera(self)
     if camera == nil or x == nil then
         return
     end
-    engine.set_position(camera, x, y + CAMERA_UP, z + CAMERA_BACK)
+    engine.set_position(camera, x, y + engine.get_property(self, "camera_up"),
+        z + engine.get_property(self, "camera_back"))
     engine.look_at(camera, x, y + 1.0, z)
 end
 
@@ -187,13 +197,14 @@ function M.on_tick(self, dt)
         move_x = move_x * inverse_length
         move_z = move_z * inverse_length
     end
-    local tx = move_x * MOVE_SPEED
-    local tz = move_z * MOVE_SPEED
+    local move_speed = engine.get_property(self, "move_speed")
+    local tx = move_x * move_speed
+    local tz = move_z * move_speed
 
     local ground = ground_entity(self, x, y, z)
     local grounded = ground ~= nil
     if engine.is_key_pressed(engine.KEY_SPACE) and grounded then
-        vy = JUMP_VY
+        vy = engine.get_property(self, "jump_velocity")
         engine.set_anim_param(self, "jump", 1.0)
         if g_jump_sound ~= nil and g_jump_sound ~= 0 then
             engine.play_sound_at(g_jump_sound, x, y, z, 0.6)
