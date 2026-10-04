@@ -3,8 +3,9 @@
 // Documents name most assets by AssetRef — a GUID, plus "#<local id>" for
 // a sub-asset such as a mesh cooked from a glTF — and a few by path
 // (scripts, controllers, clips), so a document references the asset when
-// it holds either as a whole JSON string, as Unity finds references by
-// matching an asset's GUID across its text assets.
+// it holds either as a whole JSON string value, as Unity finds references
+// by matching an asset's GUID across its text assets. The documents are
+// read live, so a file edited outside the editor is searched as it is now.
 
 #pragma once
 
@@ -16,15 +17,13 @@
 
 namespace engine::editor {
 
-/// True for the asset kinds whose documents can reference other assets.
-bool asset_kind_references_assets(content::AssetTypeTag kind) noexcept;
-
-/// True when the JSON `text` holds a string that names the asset: exactly
-/// `"<virtualPath>"`, or `"<ref>"` in the AssetRef text form. A primary
-/// reference (no local id) also matches its sub-assets, `"<guid>#…"`,
-/// since they come from the same file. The GUID compares without regard
-/// to letter case, as the parser reads it. An empty path or a nil
-/// reference matches nothing by that route.
+/// True when the JSON `text` holds a string value that names the asset
+/// (content::scan_document_references): exactly `virtualPath`, or `ref` in
+/// the AssetRef text form. A primary reference (no local id) also matches
+/// its sub-assets, `"<guid>#…"`, since they come from the same file. The
+/// GUID compares without regard to letter case, as the parser reads it. An
+/// empty path or a nil reference matches nothing by that route, and text
+/// that is not JSON matches nothing.
 bool document_references_asset(const char *text, const char *virtualPath,
                                const core::AssetRef &ref) noexcept;
 
