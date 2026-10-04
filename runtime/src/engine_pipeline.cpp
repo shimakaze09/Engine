@@ -21,6 +21,7 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
+#include "collider_mesh_resolution.h"
 #include "engine/audio/audio.h"
 #include "engine/content/asset_staleness.h"
 #include "engine/content/asset_streaming.h"
@@ -652,6 +653,9 @@ struct EnginePipeline::Impl final {
   // Mesh ids the World references that the catalog cannot place, already
   // reported for the current content.
   UnresolvedMeshReports unresolvedMeshReports{};
+  // Collision meshes built for TriMesh colliders, shared across colliders
+  // and kept across scene loads until their asset is reimported.
+  runtime::ColliderMeshCache colliderMeshCache{};
   // The scene sky light's environment cubemap, bound in stage_assets.
   runtime::SceneEnvironment sceneEnvironment{};
   // The meshes the scene's navigation surfaces name, read in stage_assets.
@@ -1561,6 +1565,10 @@ void EnginePipeline::Impl::stage_assets() noexcept {
   // paths or the scene change, or a bake asks; otherwise one comparison
   // per surface.
   sceneNavigation.update(*world);
+  // Each TriMesh collider gets the triangles of the mesh it names, built
+  // once per mesh and shared; what will not build is reported once.
+  static_cast<void>(runtime::install_collider_meshes(*world, assetCatalog.get(),
+                                                     &colliderMeshCache));
 
   if ((assetStreamingQueue != nullptr) && (assetStreamingState != nullptr)) {
     static_cast<void>(content::update_asset_streaming(
