@@ -12,14 +12,15 @@
 #include <memory>
 #include <new>
 
+#include "engine/content/asset_sidecar.h"
+#include "engine/core/diagnostic.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/core/string_util.h"
 #include "engine/core/vfs.h"
 #include "engine/math/vec3.h"
-#include "texture_handle_codec.h"
 #include "engine/renderer/render_device.h"
-#include "engine/core/diagnostic.h"
+#include "texture_handle_codec.h"
 
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -104,6 +105,9 @@ struct TextureSlot final {
   // External slots alias a device texture owned elsewhere (e.g. a scene
   // capture target); the texture system never destroys their object.
   bool external = false;
+  // The colour space came from the texture's import settings, not from
+  // the slot that asked for it.
+  bool colorSpaceAuthored = false;
   std::array<char, kMaxPathLen> path{};
 };
 
@@ -483,6 +487,47 @@ void shutdown_texture_system() noexcept {
   g_texState.initialized = false;
 }
 
+namespace {
+
+/// The import settings of the texture at `virtualPath`, from its sidecar.
+/// A texture with no sidecar, no settings or a sidecar that will not read
+/// (which the reader logs) loads at the defaults: the image still shows.
+content::TextureImportSettings
+texture_import_settings(const char *virtualPath) noexcept {
+  char osPath[1024] = {};
+  content::AssetSidecar sidecar{};
+  if (core::vfs_resolve_os_path(virtualPath, osPath, sizeof(osPath)) &&
+      (content::read_asset_sidecar(osPath, &sidecar) ==
+       content::SidecarReadResult::Ok) &&
+      sidecar.hasTextureImport) {
+    return sidecar.textureImport;
+  }
+  return content::TextureImportSettings{};
+}
+
+} // namespace
+
+std::int64_t texture_input_write_time(const char *virtualPath) noexcept {
+  if (virtualPath == nullptr) {
+    return 0;
+  }
+  const std::int64_t image = core::vfs_file_mtime(virtualPath);
+  char sidecarPath[kMaxPathLen + 8U] = {};
+  const int written =
+      std::snprintf(sidecarPath, sizeof(sidecarPath), "%s.meta", virtualPath);
+  if ((written <= 0) ||
+      (static_cast<std::size_t>(written) >= sizeof(sidecarPath))) {
+    return image;
+  }
+  const std::int64_t sidecar = core::vfs_file_mtime(sidecarPath);
+  return (sidecar > image) ? sidecar : image;
+}
+
+bool texture_color_space_authored(TextureHandle handle) noexcept {
+  const TextureSlot *slot = lookup_texture_slot(handle);
+  return (slot != nullptr) && slot->colorSpaceAuthored;
+}
+
 TextureHandle load_texture(const char *virtualPath,
                            TextureColorSpace space) noexcept {
   if ((virtualPath == nullptr) || !g_texState.initialized) {
@@ -514,6 +559,21 @@ TextureHandle load_texture(const char *virtualPath,
     log_texture_path_error(virtualPath, "texture file is empty");
     return kInvalidTextureHandle;
   }
+
+  const content::TextureImportSettings settings =
+      texture_import_settings(virtualPath);
+  const bool colorSpaceAuthored =
+      settings.colorSpace != content::TextureColorSpaceSetting::Auto;
+  if (colorSpaceAuthored) {
+    space = (settings.colorSpace == content::TextureColorSpaceSetting::Srgb)
+                ? TextureColorSpace::Srgb
+                : TextureColorSpace::Linear;
+  }
+  const TextureWrap wrap = (settings.wrap == content::TextureWrapSetting::Clamp)
+                               ? TextureWrap::ClampEdge
+                               : TextureWrap::Repeat;
+  const bool nearest =
+      settings.filter == content::TextureFilterSetting::Nearest;
 
   const auto *fileBytes = static_cast<const unsigned char *>(fileData);
   int width = 0;
@@ -560,8 +620,8 @@ TextureHandle load_texture(const char *virtualPath,
       desc.width = width;
       desc.height = height;
       desc.mipLevels = 1;
-      desc.filter = TextureFilter::Linear;
-      desc.wrap = TextureWrap::Repeat;
+      desc.filter = nearest ? TextureFilter::Nearest : TextureFilter::Linear;
+      desc.wrap = wrap;
       desc.pixelData = TexelData::F32;
       desc.pixels = pixels;
       deviceTexture = dev->create_texture(desc);
@@ -588,9 +648,12 @@ TextureHandle load_texture(const char *virtualPath,
       desc.format = ldr_format_for_channels(channels);
       desc.width = width;
       desc.height = height;
-      desc.mipLevels = 0; // full generated chain, as image assets always had
-      desc.filter = TextureFilter::LinearMipmap;
-      desc.wrap = TextureWrap::Repeat;
+      // A full generated chain unless the settings turn it off.
+      desc.mipLevels = settings.generateMips ? 0 : 1;
+      desc.filter = nearest                 ? TextureFilter::Nearest
+                    : settings.generateMips ? TextureFilter::LinearMipmap
+                                            : TextureFilter::Linear;
+      desc.wrap = wrap;
       desc.pixelData = TexelData::U8;
       desc.srgb = srgb;
       desc.pixels = pixels;
@@ -609,6 +672,7 @@ TextureHandle load_texture(const char *virtualPath,
   slot.occupied = true;
   slot.hdr = isHdr;
   slot.cubemap = false;
+  slot.colorSpaceAuthored = colorSpaceAuthored;
   safe_copy_path(slot.path.data(), slot.path.size(), virtualPath);
 
   return make_texture_handle(freeSlot);
@@ -731,6 +795,7 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
   slot.device = deviceTexture;
   slot.occupied = true;
   slot.hdr = true;
+  slot.colorSpaceAuthored = false;
   slot.cubemap = true;
   safe_copy_path(slot.path.data(), slot.path.size(), virtualPath);
 
@@ -775,6 +840,7 @@ TextureHandle register_external_texture(
   slot.external = true;
   slot.device = texture;
   slot.hdr = false;
+  slot.colorSpaceAuthored = false;
   slot.cubemap = false;
   safe_copy_path(slot.path.data(), slot.path.size(), "<external>");
   return make_texture_handle(freeSlot);

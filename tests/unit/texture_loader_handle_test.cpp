@@ -1,6 +1,7 @@
 // Verifies texture handle generation prevents stale slot reuse, that the
-// loader serves every slot its handle can name, and that a device whose
-// texture table is full refuses a texture before the file is read.
+// loader serves every slot its handle can name, that a device whose
+// texture table is full refuses a texture before the file is read, and
+// that a texture's import settings decide how it is created.
 
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
@@ -10,9 +11,12 @@
 
 #include "../fake_render_device.h"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <system_error>
 
 namespace engine::renderer {
 
@@ -90,6 +94,80 @@ int check_color_space_reaches_the_device() {
   engine::renderer::unload_texture(data);
   engine::renderer::shutdown_texture_system();
   static_cast<void>(std::remove("texture_color_space_grey.png"));
+  engine::core::shutdown_vfs();
+  return result;
+}
+
+/// A texture's import settings, from its sidecar, decide how it is
+/// created: an authored Linear colour space wins over the sRGB a colour
+/// slot asks for, no mips, nearest filtering and clamp reach the device,
+/// and the colour space reads as authored. With no sidecar the texture
+/// loads at the defaults. The newer of the image's and the sidecar's
+/// write times is the texture's input time, so a settings edit reloads it.
+int check_import_settings_reach_the_device() {
+  using engine::renderer::TextureColorSpace;
+  using engine::renderer::TextureFilter;
+  using engine::renderer::TextureFormat;
+  using engine::renderer::TextureWrap;
+  constexpr const char *kPath = "tex/texture_import_settings.png";
+  constexpr const char *kSidecar = "tex/texture_import_settings.png.meta";
+  constexpr const char kSettings[] =
+      "{\n  \"schemaVersion\": 1,\n  \"guid\": "
+      "\"33333333-4444-4555-8666-777777777777\",\n  \"importSettings\": {"
+      "\n    \"colorSpace\": \"linear\",\n    \"generateMips\": false,"
+      "\n    \"filter\": \"nearest\",\n    \"wrap\": \"clamp\"\n  }\n}\n";
+  engine::renderer::reset_fake_device();
+  if (!engine::core::initialize_vfs() || !engine::core::mount("tex", ".") ||
+      !engine::core::vfs_write_binary(kPath, kGreyPng, sizeof(kGreyPng)) ||
+      !engine::core::vfs_write_binary(kSidecar, kSettings,
+                                      sizeof(kSettings) - 1U) ||
+      !engine::renderer::initialize_texture_system()) {
+    engine::core::shutdown_vfs();
+    return 80;
+  }
+  int result = 0;
+  const engine::renderer::TextureDesc &last =
+      engine::tests::fake_log().lastTexture;
+  const engine::renderer::TextureHandle authored =
+      engine::renderer::load_texture(kPath, TextureColorSpace::Srgb);
+  if ((authored == engine::renderer::kInvalidTextureHandle) || last.srgb ||
+      (last.format != TextureFormat::R8) || (last.mipLevels != 1) ||
+      (last.filter != TextureFilter::Nearest) ||
+      (last.wrap != TextureWrap::ClampEdge) ||
+      !engine::renderer::texture_color_space_authored(authored)) {
+    result = 81;
+  }
+
+  // The sidecar newer than the image is the texture's input time.
+  std::error_code ec{};
+  const auto imageTime =
+      std::filesystem::last_write_time("texture_import_settings.png", ec);
+  std::filesystem::last_write_time("texture_import_settings.png.meta",
+                                   imageTime + std::chrono::seconds(5), ec);
+  if ((result == 0) && (ec ||
+                        (engine::renderer::texture_input_write_time(kPath) !=
+                         engine::core::vfs_file_mtime(kSidecar)) ||
+                        (engine::renderer::texture_input_write_time(kPath) <=
+                         engine::core::vfs_file_mtime(kPath)))) {
+    result = 82;
+  }
+
+  static_cast<void>(std::remove("texture_import_settings.png.meta"));
+  const engine::renderer::TextureHandle defaults =
+      engine::renderer::load_texture(kPath, TextureColorSpace::Srgb);
+  if ((result == 0) &&
+      ((defaults == engine::renderer::kInvalidTextureHandle) || !last.srgb ||
+       (last.mipLevels != 0) || (last.filter != TextureFilter::LinearMipmap) ||
+       (last.wrap != TextureWrap::Repeat) ||
+       engine::renderer::texture_color_space_authored(defaults) ||
+       (engine::renderer::texture_input_write_time(kPath) !=
+        engine::core::vfs_file_mtime(kPath)))) {
+    result = 83;
+  }
+  engine::renderer::unload_texture(authored);
+  engine::renderer::unload_texture(defaults);
+  engine::renderer::shutdown_texture_system();
+  static_cast<void>(std::remove("texture_import_settings.png"));
   engine::core::shutdown_vfs();
   return result;
 }
@@ -515,6 +593,11 @@ int main() {
   const int colourResult = check_color_space_reaches_the_device();
   if (colourResult != 0) {
     return colourResult;
+  }
+
+  const int settingsResult = check_import_settings_reach_the_device();
+  if (settingsResult != 0) {
+    return settingsResult;
   }
 
   return check_texture_handle_generation();

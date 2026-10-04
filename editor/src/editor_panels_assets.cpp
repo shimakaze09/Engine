@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "editor_import_settings.h"
+#include "engine/content/asset_import_settings.h"
 #include "engine/content/asset_metadata.h"
 #include "engine/core/atomic_file.h"
 #include "engine/core/json.h"
@@ -47,21 +48,55 @@ namespace engine::editor {
 
 namespace {
 
-/// Draws the Import Settings inspector for a mesh source.
+/// Draws a texture source's import settings and saves an edit at once:
+/// the texture loader reads them, and a saved sidecar reloads the texture.
+void draw_texture_import_settings(
+    const char *assetPath, const content::TextureImportSettings &current) {
+  content::TextureImportSettings edited = current;
+  int colorSpace = static_cast<int>(edited.colorSpace);
+  int filter = static_cast<int>(edited.filter);
+  int wrap = static_cast<int>(edited.wrap);
+  const char *colorSpaceLabels[] = {"Auto (by material slot)", "sRGB (colour)",
+                                    "Linear (data)"};
+  const char *filterLabels[] = {"Linear", "Nearest (pixel art)"};
+  const char *wrapLabels[] = {"Repeat", "Clamp"};
+  bool changed = false;
+  changed |= ImGui::Combo("Color Space", &colorSpace, colorSpaceLabels, 3);
+  changed |= ImGui::Checkbox("Generate Mip Maps", &edited.generateMips);
+  changed |= ImGui::Combo("Filter", &filter, filterLabels, 2);
+  changed |= ImGui::Combo("Wrap", &wrap, wrapLabels, 2);
+  if (!changed) {
+    return;
+  }
+  edited.colorSpace =
+      static_cast<content::TextureColorSpaceSetting>(colorSpace);
+  edited.filter = static_cast<content::TextureFilterSetting>(filter);
+  edited.wrap = static_cast<content::TextureWrapSetting>(wrap);
+  if (!save_import_settings(assetPath, edited)) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "import settings save failed — the .meta on disk is "
+                      "unchanged");
+  }
+}
+
+/// Draws the Import Settings inspector for a source whose type has import
+/// settings (asset_import_settings.h): a mesh's, which its cook reads, or
+/// a texture's, which its load applies.
 ///
-/// Only for a source (.gltf / .glb), because the authored sidecar lives
-/// beside the source and that is the file the cook reads. A cooked
-/// ".mesh" is derived: it has no settings of its own to edit, and the
-/// editor will offer them on it again once cooked outputs record which
-/// source produced them, rather than by guessing from the filename.
+/// Only for a source, because the authored sidecar lives beside the
+/// source. A cooked ".mesh" is derived: it has no settings of its own to
+/// edit, and the editor will offer them on it again once cooked outputs
+/// record which source produced them, rather than by guessing from the
+/// filename.
 void draw_import_settings_inspector(const char *assetPath) noexcept {
   if ((assetPath == nullptr) || (assetPath[0] == '\0')) {
     return;
   }
   const content::AssetClassification classification =
       content::classify_asset_path(assetPath);
-  if ((classification.tag != content::AssetTypeTag::Mesh) ||
-      !classification.source) {
+  const content::ImportSettingsKind kind =
+      content::import_settings_kind(classification.tag);
+  if ((kind == content::ImportSettingsKind::None) || !classification.source) {
     return;
   }
 
@@ -87,6 +122,10 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
   ImGui::Separator();
   if (!ImGui::CollapsingHeader("Import Settings",
                                ImGuiTreeNodeFlags_DefaultOpen)) {
+    return;
+  }
+  if (kind == content::ImportSettingsKind::Texture) {
+    draw_texture_import_settings(assetPath, doc->textureSettings);
     return;
   }
 

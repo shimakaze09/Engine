@@ -52,6 +52,38 @@ struct MeshImportSettings final {
                                    const MeshImportSettings &) = default;
 };
 
+/// Which colour space a texture's texels are read in. Auto leaves it to
+/// the material slot that samples the texture, as before textures had
+/// settings: base colour and emissive maps sRGB, every other map linear.
+/// Srgb and Linear say what the file holds whatever samples it, as
+/// Unity's sRGB (Color Texture) checkbox does.
+enum class TextureColorSpaceSetting : std::uint8_t { Auto, Srgb, Linear };
+
+/// How a texture is filtered when sampled: Linear blends neighbouring
+/// texels (and mips, when it has them); Nearest takes the closest texel,
+/// which pixel art wants.
+enum class TextureFilterSetting : std::uint8_t { Linear, Nearest };
+
+/// What a texture coordinate outside 0..1 reads: Repeat tiles the image,
+/// Clamp holds its edge texels.
+enum class TextureWrapSetting : std::uint8_t { Repeat, Clamp };
+
+/// How a texture source is loaded: authored in its ".meta" sidecar, edited
+/// in the Inspector. Textures are read from their source at load, so the
+/// loader applies these directly; the defaults are what every texture got
+/// before it had settings.
+struct TextureImportSettings final {
+  TextureColorSpaceSetting colorSpace = TextureColorSpaceSetting::Auto;
+  /// A full mip chain is generated from the image, so a texture seen small
+  /// is not aliased.
+  bool generateMips = true;
+  TextureFilterSetting filter = TextureFilterSetting::Linear;
+  TextureWrapSetting wrap = TextureWrapSetting::Repeat;
+
+  friend constexpr bool operator==(const TextureImportSettings &,
+                                   const TextureImportSettings &) = default;
+};
+
 /// Stores asset metadata used by the engine.
 struct AssetMetadata final {
   static constexpr std::size_t kMaxTags = 16U;

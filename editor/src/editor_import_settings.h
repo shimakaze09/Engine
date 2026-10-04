@@ -1,7 +1,8 @@
 // Declares the Assets panel's import-settings cache: the selected
 // source's authored ".meta" sidecar is read and parsed once per
 // selection, or after the panel rewrites it, instead of once per drawn
-// frame.
+// frame. A mesh source's settings feed its cook; a texture source's are
+// applied when the texture loads.
 //
 // The authored sidecar is the only place import settings live. The cook
 // reads them from there and writes them nowhere, so the panel edits the
@@ -32,8 +33,13 @@ struct ImportSettingsDocument final {
     Valid
   };
   State state = State::Missing;
+  /// A mesh source's settings; `hasSettings` as above.
   bool hasSettings = false;
   content::MeshImportSettings settings{};
+  /// A texture source's settings; false `hasTextureSettings` loads at the
+  /// defaults.
+  bool hasTextureSettings = false;
+  content::TextureImportSettings textureSettings{};
 };
 
 /// Returns the authored sidecar for `assetPath`, reading the file only
@@ -49,6 +55,11 @@ import_settings_for_asset(const char *assetPath) noexcept;
 /// asset an identity nobody imported. Invalidates the cache either way.
 bool save_import_settings(const char *assetPath,
                           const content::MeshImportSettings &settings) noexcept;
+/// The same for a texture source's settings; the sidecar refuses them on
+/// any other type of asset.
+bool save_import_settings(
+    const char *assetPath,
+    const content::TextureImportSettings &settings) noexcept;
 
 /// Drops the cached document so the next call re-reads it (after the panel
 /// rewrote the sidecar, or a recook replaced it).

@@ -123,6 +123,8 @@ std::uint64_t null_native_texture_id(DeviceTextureHandle) noexcept {
 
 DeviceDebugStats null_debug_stats() noexcept { return DeviceDebugStats{}; }
 
+bool null_frame_applies_reset() noexcept { return false; }
+
 } // namespace
 
 void fill_null_render_device(RenderDevice *device) noexcept {
@@ -191,6 +193,7 @@ void fill_null_render_device(RenderDevice *device) noexcept {
   device->timestamp_value = &null_timestamp_value;
   device->native_texture_id = &null_native_texture_id;
   device->debug_stats = &null_debug_stats;
+  device->frame_applies_reset = &null_frame_applies_reset;
 }
 
 } // namespace engine::renderer
