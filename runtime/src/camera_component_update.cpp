@@ -74,9 +74,8 @@ void update_persistent_cameras(World &world, float dt) noexcept {
 
     CameraEntry entry{};
     entry.position = position;
-    entry.target = math::add(
-        position, math::rotate_vector(math::Vec3(0.0F, 0.0F, -1.0F), rotation));
-    entry.up = math::rotate_vector(math::Vec3(0.0F, 1.0F, 0.0F), rotation);
+    entry.target = math::add(position, math::forward(rotation));
+    entry.up = math::up(rotation);
     entry.fovRadians = camera.fovRadians;
     entry.nearPlane = camera.nearPlane;
     entry.farPlane = camera.farPlane;
@@ -136,9 +135,8 @@ bool camera_component_pose(const World &world, core::Entity entity,
 
   renderer::CameraState state{};
   state.position = position;
-  state.target = math::add(
-      position, math::rotate_vector(math::Vec3(0.0F, 0.0F, -1.0F), rotation));
-  state.up = math::rotate_vector(math::Vec3(0.0F, 1.0F, 0.0F), rotation);
+  state.target = math::add(position, math::forward(rotation));
+  state.up = math::up(rotation);
   state.fovRadians = camera->fovRadians;
   state.nearPlane = camera->nearPlane;
   state.farPlane = camera->farPlane;

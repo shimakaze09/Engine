@@ -37,16 +37,8 @@ Transform advance_kinematic(const RigidBody &body, Transform transform,
                             float deltaSeconds) noexcept {
   transform.position = engine::math::add(
       transform.position, engine::math::mul(body.velocity, deltaSeconds));
-  const float angSpeedSq = engine::math::length_sq(body.angularVelocity);
-  if (angSpeedSq > 1e-12F) {
-    const float angSpeed = std::sqrt(angSpeedSq);
-    const engine::math::Vec3 axis =
-        engine::math::div(body.angularVelocity, angSpeed);
-    const engine::math::Quat deltaRot =
-        engine::math::from_axis_angle(axis, angSpeed * deltaSeconds);
-    transform.rotation = engine::math::normalize(
-        engine::math::mul(deltaRot, transform.rotation));
-  }
+  transform.rotation = engine::math::integrate(
+      transform.rotation, body.angularVelocity, deltaSeconds);
   return transform;
 }
 
@@ -229,17 +221,8 @@ bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
     }
 
     if ((body != nullptr) && math::has_rotational_dof(body->inverseInertia)) {
-      const float angSpeedSq = engine::math::length_sq(body->angularVelocity);
-      if (angSpeedSq > 1e-12F) {
-        const float angSpeed = std::sqrt(angSpeedSq);
-        const float angle = angSpeed * deltaSeconds;
-        const engine::math::Vec3 axis =
-            engine::math::div(body->angularVelocity, angSpeed);
-        const engine::math::Quat deltaRot =
-            engine::math::from_axis_angle(axis, angle);
-        updated.rotation = engine::math::normalize(
-            engine::math::mul(deltaRot, updated.rotation));
-      }
+      updated.rotation = engine::math::integrate(
+          updated.rotation, body->angularVelocity, deltaSeconds);
     }
 
     writeTransforms[i] = updated;

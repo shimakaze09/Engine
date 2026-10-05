@@ -300,10 +300,8 @@ std::size_t collect_scene_captures(const runtime::World &world,
     renderer::SceneCaptureRequest &request = outRequests[requestCount];
     request = renderer::SceneCaptureRequest{};
     request.camera.position = position;
-    request.camera.target = math::add(
-        position, math::rotate_vector(math::Vec3(0.0F, 0.0F, -1.0F), rotation));
-    request.camera.up =
-        math::rotate_vector(math::Vec3(0.0F, 1.0F, 0.0F), rotation);
+    request.camera.target = math::add(position, math::forward(rotation));
+    request.camera.up = math::up(rotation);
     request.camera.fovRadians = capture->fovRadians;
     request.camera.nearPlane = capture->nearPlane;
     request.camera.farPlane = capture->farPlane;

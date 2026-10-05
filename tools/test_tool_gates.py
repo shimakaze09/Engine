@@ -1520,6 +1520,19 @@ def test_duplicate_primitive_gate():
             "// Purpose.\nfloat x = std::strtof(b, &e);\n")]) == 0,
               "duplicate primitives: the JSON number reader is allowed")
         check(run([script, "--root", case(
+            "inverse_rotation", "physics/src/a.cpp",
+            "// Purpose.\nv = math::rotate_vector(w, math::conjugate(q));\n")]) != 0,
+              "duplicate primitives: rotating by a conjugate is a finding")
+        check(run([script, "--root", case(
+            "axis_accessor", "runtime/src/a.cpp",
+            "// Purpose.\nf = math::rotate_vector(math::Vec3(0.0F, 0.0F, "
+            "-1.0F), q);\n")]) != 0,
+              "duplicate primitives: rotating a basis vector is a finding")
+        check(run([script, "--root", case(
+            "axis_owner", "math/include/engine/math/quat.h",
+            "// Purpose.\nreturn rotate_vector(Vec3(0.0F, 0.0F, -1.0F), q);\n")]) == 0,
+              "duplicate primitives: the quaternion owner may spell its axes")
+        check(run([script, "--root", case(
             "exp_blend", "renderer/src/a.cpp",
             "// Purpose.\nfloat k = 1.0F - std::exp(-rate * dt);\n")]) != 0,
               "duplicate primitives: a hand-written exponential blend is a "
