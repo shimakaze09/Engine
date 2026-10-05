@@ -11,6 +11,7 @@
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
+#include "engine/math/interpolation.h"
 
 namespace engine::renderer {
 
@@ -55,8 +56,7 @@ float dynamic_resolution_step(DynamicResolutionState &state, float frameMs,
   state.smoothedFrameMs =
       (state.smoothedFrameMs <= 0.0F)
           ? frameMs
-          : (state.smoothedFrameMs +
-             kFrameTimeAlpha * (frameMs - state.smoothedFrameMs));
+          : math::lerp(state.smoothedFrameMs, frameMs, kFrameTimeAlpha);
   if (state.cooldownFrames > 0) {
     --state.cooldownFrames;
     state.scale = std::clamp(state.scale, clampedMin, 1.0F);

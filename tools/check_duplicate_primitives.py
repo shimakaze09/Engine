@@ -230,6 +230,34 @@ RULES: tuple[Rule, ...] = (
         remedy="include editor_inspector_widgets.h and use "
         "inspector_linear_color3",
     ),
+    Rule(
+        name="the exponential smoothing factor",
+        owner="math/include/engine/math/interpolation.h",
+        # One minus e to a negative power is what a hand-written
+        # exponential approach computes: the exposure adaptation carried
+        # one through libm's exp, which differs between platforms.
+        pattern=r"1(?:\.0F?)?\s*-\s*(?:std::exp|(?<![\w:])expf?)\(\s*-",
+        remedy="call engine::math::exp_decay_factor() or exp_decay()",
+    ),
+    Rule(
+        name="the step-size-independent blend",
+        owner="math/include/engine/math/interpolation.h",
+        # A lerp whose fraction is a rate times the step converges at a
+        # different speed when the step changes; the spring arm's lag did.
+        pattern=r"(?<!\w)lerp\([^;]*\*\s*(?:dt|deltaTime|deltaSeconds)\s*\)",
+        remedy="call engine::math::exp_decay(current, target, rate, dt)",
+    ),
+    Rule(
+        name="angle wrapping",
+        owner="math/include/engine/math/interpolation.h",
+        # Comparing an angle against a pi constant is how a hand-written
+        # wrap starts: the hinge joint carried a loop of them.
+        pattern=r"(?:while|if)\s*\(\s*\w+\s*[<>]=?\s*-?\s*k\w*Pi\s*\)",
+        remedy="call engine::math::wrap_angle() or delta_angle()",
+        # core sits below math in the dependency graph, so the touch
+        # gesture's one-turn correction cannot call the owner.
+        allowed=("core/src/touch_input.cpp",),
+    ),
 )
 
 

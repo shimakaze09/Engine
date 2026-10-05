@@ -18,6 +18,7 @@
 #include "engine/core/platform.h"
 #include "engine/core/string_util.h"
 #include "engine/core/vfs.h"
+#include "engine/math/interpolation.h"
 #include "engine/math/vec3.h"
 #include "engine/renderer/render_device.h"
 #include "texture_handle_codec.h"
@@ -366,9 +367,9 @@ float sample_equirect_channel(const float *pixels, int width, int height,
   const float c10 = pixel_at(wrappedX1, clampedY0, channel);
   const float c01 = pixel_at(wrappedX0, clampedY1, channel);
   const float c11 = pixel_at(wrappedX1, clampedY1, channel);
-  const float cx0 = c00 + (c10 - c00) * tx;
-  const float cx1 = c01 + (c11 - c01) * tx;
-  return cx0 + (cx1 - cx0) * ty;
+  const float cx0 = math::lerp(c00, c10, tx);
+  const float cx1 = math::lerp(c01, c11, tx);
+  return math::lerp(cx0, cx1, ty);
 }
 
 void sample_equirect_direction(const float *pixels, int width, int height,

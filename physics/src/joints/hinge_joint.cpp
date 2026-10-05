@@ -28,6 +28,7 @@
 
 #include "joint_solvers.h"
 
+#include "engine/math/interpolation.h"
 #include "engine/math/scalar.h"
 #include "engine/math/vec3.h"
 
@@ -38,21 +39,6 @@
 namespace engine::physics {
 
 constexpr float kHingeEpsilon = 1.0e-6F;
-constexpr float kHingePi = 3.14159265F;
-constexpr float kHingeTwoPi = 6.28318531F;
-
-/// Wraps an angle into [-pi, pi]; inputs stay within a few turns, so the
-/// bounded correction loop is exact and deterministic.
-static float wrap_to_pi(float angle) noexcept {
-  while (angle > kHingePi) {
-    angle -= kHingeTwoPi;
-  }
-  while (angle < -kHingePi) {
-    angle += kHingeTwoPi;
-  }
-  return angle;
-}
-
 /// Signed twist of B relative to A about `axis` from the projected
 /// creation-time references; false when a reference degenerates.
 static bool measure_twist(const math::Vec3 &axis, const math::Vec3 &refA,
@@ -101,7 +87,7 @@ float solve_hinge_joint(JointSolveContext &ctx,
         joint.twistTracked = true;
       } else {
         joint.twistContinuous +=
-            wrap_to_pi(twist - wrap_to_pi(joint.twistContinuous));
+            math::wrap_angle(twist - math::wrap_angle(joint.twistContinuous));
       }
       const float clamped =
           (joint.twistContinuous < joint.minLimit)

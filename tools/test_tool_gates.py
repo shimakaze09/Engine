@@ -1520,6 +1520,31 @@ def test_duplicate_primitive_gate():
             "// Purpose.\nfloat x = std::strtof(b, &e);\n")]) == 0,
               "duplicate primitives: the JSON number reader is allowed")
         check(run([script, "--root", case(
+            "exp_blend", "renderer/src/a.cpp",
+            "// Purpose.\nfloat k = 1.0F - std::exp(-rate * dt);\n")]) != 0,
+              "duplicate primitives: a hand-written exponential blend is a "
+              "finding")
+        check(run([script, "--root", case(
+            "det_exp_owner", "math/include/engine/math/interpolation.h",
+            "// Purpose.\nreturn 1.0F - det_exp(-(rate * dt));\n")]) == 0,
+              "duplicate primitives: the interpolation owner may compute it")
+        check(run([script, "--root", case(
+            "dt_lerp", "runtime/src/a.cpp",
+            "// Purpose.\nx = math::lerp(x, goal, speed * dt);\n")]) != 0,
+              "duplicate primitives: a step-scaled lerp is a finding")
+        check(run([script, "--root", case(
+            "plain_lerp", "runtime/src/a.cpp",
+            "// Purpose.\nx = math::lerp(x, goal, t);\n")]) == 0,
+              "duplicate primitives: a lerp by a plain fraction passes")
+        check(run([script, "--root", case(
+            "angle_wrap", "physics/src/a.cpp",
+            "// Purpose.\nwhile (angle > kHingePi) {\n")]) != 0,
+              "duplicate primitives: a hand-written angle wrap is a finding")
+        check(run([script, "--root", case(
+            "touch_wrap", "core/src/touch_input.cpp",
+            "// Purpose.\nif (angleDelta > kPi) {\n")]) == 0,
+              "duplicate primitives: core's touch gesture wrap is allowed")
+        check(run([script, "--root", case(
             "tests_exempt", "tests/integration/a.cpp",
             "// Purpose.\nauto h = 1099511628211ULL;\n")]) == 0,
               "duplicate primitives: the test tree is out of scope")

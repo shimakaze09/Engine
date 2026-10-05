@@ -8,6 +8,7 @@
 
 #include "engine/core/logging.h"
 #include "engine/math/frustum.h"
+#include "engine/math/interpolation.h"
 #include "engine/math/mat4.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec3.h"
@@ -103,7 +104,7 @@ CascadeSplits compute_cascade_splits(float nearClip, float farClip,
     const float p =
         static_cast<float>(i) / static_cast<float>(kShadowCascadeCount);
     const float logSplit = nearClip * std::pow(farClip / nearClip, p);
-    const float uniformSplit = nearClip + (farClip - nearClip) * p;
+    const float uniformSplit = math::lerp(nearClip, farClip, p);
     splits.distances[i] = lambda * logSplit + (1.0F - lambda) * uniformSplit;
   }
 

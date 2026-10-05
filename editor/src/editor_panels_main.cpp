@@ -45,6 +45,7 @@
 #include "engine/core/reflect.h"
 #include "engine/editor/editor_camera.h"
 #include "engine/engine.h"
+#include "engine/math/interpolation.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
@@ -475,10 +476,9 @@ void draw_toolbar() noexcept {
     const ImVec4 accent(0.20F, 0.38F, 0.70F, base.w);
     constexpr float kTint = 0.45F;
     ImGui::PushStyleColor(ImGuiCol_WindowBg,
-                          ImVec4(base.x + ((accent.x - base.x) * kTint),
-                                 base.y + ((accent.y - base.y) * kTint),
-                                 base.z + ((accent.z - base.z) * kTint),
-                                 base.w));
+                          ImVec4(math::lerp(base.x, accent.x, kTint),
+                                 math::lerp(base.y, accent.y, kTint),
+                                 math::lerp(base.z, accent.z, kTint), base.w));
   }
   const bool open = ImGui::Begin("##toolbar", nullptr, kToolbarFlags);
   if (running) {
