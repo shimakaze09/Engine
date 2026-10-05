@@ -4,6 +4,7 @@
 #include "binding_util.h"
 
 #include "debug_bindings.h"
+#include "lua_math_values.h"
 #include "lua_state.h"
 
 extern "C" {
@@ -119,29 +120,95 @@ int registry_ref_trampoline(lua_State *state) noexcept {
 
 } // namespace
 
-/// Reads vec3 args data. Non-finite components are rejected here so a NaN
+/// Reads vec3 arg data. Non-finite components are rejected here so a NaN
 /// or infinity from Lua fails at the call that produced it rather than
 /// being logged by whichever World ingress it eventually reaches.
-bool read_vec3_args(lua_State *state, int startIndex,
-                    math::Vec3 *outVec) noexcept {
-  if ((outVec == nullptr) || !lua_isnumber(state, startIndex) ||
-      !lua_isnumber(state, startIndex + 1) ||
-      !lua_isnumber(state, startIndex + 2)) {
+bool read_vec3_arg(lua_State *state, int *index, math::Vec3 *outVec) noexcept {
+  if ((index == nullptr) || (outVec == nullptr)) {
     return false;
   }
+  math::Vec3 value{};
+  int consumed = 1;
+  if (!to_vec3_value(state, *index, &value)) {
+    const int first = *index;
+    if (!lua_isnumber(state, first) || !lua_isnumber(state, first + 1) ||
+        !lua_isnumber(state, first + 2)) {
+      return false;
+    }
+    value = math::Vec3(static_cast<float>(lua_tonumber(state, first)),
+                       static_cast<float>(lua_tonumber(state, first + 1)),
+                       static_cast<float>(lua_tonumber(state, first + 2)));
+    consumed = 3;
+  }
+  if (!std::isfinite(value.x) || !std::isfinite(value.y) ||
+      !std::isfinite(value.z)) {
+    return false;
+  }
+  *outVec = value;
+  *index += consumed;
+  return true;
+}
 
-  const float x = static_cast<float>(lua_tonumber(state, startIndex));
-  const float y = static_cast<float>(lua_tonumber(state, startIndex + 1));
-  const float z = static_cast<float>(lua_tonumber(state, startIndex + 2));
-  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+bool read_optional_vec3_arg(lua_State *state, int *index,
+                            const math::Vec3 &defaults,
+                            math::Vec3 *outVec) noexcept {
+  if ((index == nullptr) || (outVec == nullptr)) {
     return false;
   }
-  *outVec = math::Vec3(x, y, z);
+  math::Vec3 value{};
+  if (to_vec3_value(state, *index, &value)) {
+    if (!std::isfinite(value.x) || !std::isfinite(value.y) ||
+        !std::isfinite(value.z)) {
+      return false;
+    }
+    *outVec = value;
+    *index += 1;
+    return true;
+  }
+  const int first = *index;
+  if (!read_optional_finite_number_arg(state, first, defaults.x, &value.x) ||
+      !read_optional_finite_number_arg(state, first + 1, defaults.y,
+                                       &value.y) ||
+      !read_optional_finite_number_arg(state, first + 2, defaults.z,
+                                       &value.z)) {
+    return false;
+  }
+  *outVec = value;
+  *index += 3;
+  return true;
+}
+
+bool read_quat_arg(lua_State *state, int *index,
+                   math::Quat *outQuat) noexcept {
+  if ((index == nullptr) || (outQuat == nullptr)) {
+    return false;
+  }
+  math::Quat value{};
+  int consumed = 1;
+  if (!to_quat_value(state, *index, &value)) {
+    const int first = *index;
+    for (int i = 0; i < 4; ++i) {
+      if (!lua_isnumber(state, first + i)) {
+        return false;
+      }
+    }
+    value = math::Quat(static_cast<float>(lua_tonumber(state, first)),
+                       static_cast<float>(lua_tonumber(state, first + 1)),
+                       static_cast<float>(lua_tonumber(state, first + 2)),
+                       static_cast<float>(lua_tonumber(state, first + 3)));
+    consumed = 4;
+  }
+  if (!std::isfinite(value.x) || !std::isfinite(value.y) ||
+      !std::isfinite(value.z) || !std::isfinite(value.w)) {
+    return false;
+  }
+  *outQuat = value;
+  *index += consumed;
   return true;
 }
 
 /// Reads finite number args data: the scalar counterpart of
-/// read_vec3_args, so scalar bindings reject non-finite input the same way.
+/// read_vec3_arg, so scalar bindings reject non-finite input the same way.
 bool read_finite_number_arg(lua_State *state, int index,
                             float *outValue) noexcept {
   if ((outValue == nullptr) || !lua_isnumber(state, index)) {

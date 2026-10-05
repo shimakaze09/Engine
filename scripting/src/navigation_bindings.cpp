@@ -46,7 +46,8 @@ const char *path_failure_name(RuntimePathResult result) noexcept {
 int lua_engine_find_path(lua_State *state) noexcept {
   math::Vec3 start{};
   math::Vec3 end{};
-  if (!read_vec3_args(state, 1, &start) || !read_vec3_args(state, 4, &end)) {
+  int arg = 1;
+  if (!read_vec3_arg(state, &arg, &start) || !read_vec3_arg(state, &arg, &end)) {
     lua_pushnil(state);
     lua_pushstring(state, "invalid");
     return 2;
@@ -122,8 +123,9 @@ const char *agent_failure_name(RuntimeNavAgentFailure failure) noexcept {
 int lua_engine_set_nav_destination(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 destination{};
+  int vectorArg = 2;
   if (!runtime_bound() || !read_entity(state, 1, &entity) ||
-      !read_vec3_args(state, 2, &destination)) {
+      !read_vec3_arg(state, &vectorArg, &destination)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_nav_destination takes an entity and three finite "
                       "numbers");

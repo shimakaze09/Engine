@@ -65,7 +65,8 @@ int lua_engine_remove_light(lua_State *state) noexcept {
 int lua_engine_set_light_color(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 color{};
-  if (!read_entity(state, 1, &entity) || !read_vec3_args(state, 2, &color)) {
+  int vectorArg = 2;
+  if (!read_entity(state, 1, &entity) || !read_vec3_arg(state, &vectorArg, &color)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -134,7 +135,8 @@ int lua_engine_get_light_intensity(lua_State *state) noexcept {
 int lua_engine_set_light_direction(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 dir{};
-  if (!read_entity(state, 1, &entity) || !read_vec3_args(state, 2, &dir)) {
+  int vectorArg = 2;
+  if (!read_entity(state, 1, &entity) || !read_vec3_arg(state, &vectorArg, &dir)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -154,22 +156,20 @@ int lua_engine_set_light_direction(lua_State *state) noexcept {
 // Lua: engine.add_point_light(entity, r, g, b, intensity, radius
 //                             [, cast_shadow]) → boolean
 static int lua_engine_add_point_light(lua_State *state) noexcept {
-  if (lua_gettop(state) < 6) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
     lua_pushboolean(state, 0);
     return 1;
   }
   runtime::PointLightComponent comp{};
-  comp.color.x = static_cast<float>(luaL_checknumber(state, 2));
-  comp.color.y = static_cast<float>(luaL_checknumber(state, 3));
-  comp.color.z = static_cast<float>(luaL_checknumber(state, 4));
-  comp.intensity = static_cast<float>(luaL_checknumber(state, 5));
-  comp.radius = static_cast<float>(luaL_checknumber(state, 6));
-  comp.castShadow = lua_toboolean(state, 7) != 0;
+  int arg = 2;
+  if (!read_vec3_arg(state, &arg, &comp.color) ||
+      !read_finite_number_arg(state, arg, &comp.intensity) ||
+      !read_finite_number_arg(state, arg + 1, &comp.radius)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  comp.castShadow = lua_toboolean(state, arg + 2) != 0;
   const bool ok = apply_or_queue_point_light_component(entity, comp);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -204,10 +204,6 @@ static int lua_engine_get_point_light(lua_State *state) noexcept {
 // Lua: engine.set_point_light(entity, r, g, b, intensity, radius
 //                             [, cast_shadow]) → boolean
 static int lua_engine_set_point_light(lua_State *state) noexcept {
-  if (lua_gettop(state) < 6) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
     lua_pushboolean(state, 0);
@@ -219,12 +215,14 @@ static int lua_engine_set_point_light(lua_State *state) noexcept {
     return 1;
   }
   runtime::PointLightComponent comp{};
-  comp.color.x = static_cast<float>(luaL_checknumber(state, 2));
-  comp.color.y = static_cast<float>(luaL_checknumber(state, 3));
-  comp.color.z = static_cast<float>(luaL_checknumber(state, 4));
-  comp.intensity = static_cast<float>(luaL_checknumber(state, 5));
-  comp.radius = static_cast<float>(luaL_checknumber(state, 6));
-  comp.castShadow = lua_toboolean(state, 7) != 0;
+  int arg = 2;
+  if (!read_vec3_arg(state, &arg, &comp.color) ||
+      !read_finite_number_arg(state, arg, &comp.intensity) ||
+      !read_finite_number_arg(state, arg + 1, &comp.radius)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  comp.castShadow = lua_toboolean(state, arg + 2) != 0;
   const bool ok = apply_or_queue_point_light_component(entity, comp);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -251,27 +249,23 @@ static int lua_engine_remove_point_light(lua_State *state) noexcept {
 // Lua: engine.add_spot_light(entity, r, g, b, dx, dy, dz, intensity, radius,
 //                            innerAngle, outerAngle [, cast_shadow]) → boolean
 static int lua_engine_add_spot_light(lua_State *state) noexcept {
-  if (lua_gettop(state) < 11) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
     lua_pushboolean(state, 0);
     return 1;
   }
   runtime::SpotLightComponent comp{};
-  comp.color.x = static_cast<float>(luaL_checknumber(state, 2));
-  comp.color.y = static_cast<float>(luaL_checknumber(state, 3));
-  comp.color.z = static_cast<float>(luaL_checknumber(state, 4));
-  comp.direction.x = static_cast<float>(luaL_checknumber(state, 5));
-  comp.direction.y = static_cast<float>(luaL_checknumber(state, 6));
-  comp.direction.z = static_cast<float>(luaL_checknumber(state, 7));
-  comp.intensity = static_cast<float>(luaL_checknumber(state, 8));
-  comp.radius = static_cast<float>(luaL_checknumber(state, 9));
-  comp.innerConeAngle = static_cast<float>(luaL_checknumber(state, 10));
-  comp.outerConeAngle = static_cast<float>(luaL_checknumber(state, 11));
-  comp.castShadow = lua_toboolean(state, 12) != 0;
+  int arg = 2;
+  if (!read_vec3_arg(state, &arg, &comp.color) ||
+      !read_vec3_arg(state, &arg, &comp.direction) ||
+      !read_finite_number_arg(state, arg, &comp.intensity) ||
+      !read_finite_number_arg(state, arg + 1, &comp.radius) ||
+      !read_finite_number_arg(state, arg + 2, &comp.innerConeAngle) ||
+      !read_finite_number_arg(state, arg + 3, &comp.outerConeAngle)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  comp.castShadow = lua_toboolean(state, arg + 4) != 0;
   const bool ok = apply_or_queue_spot_light_component(entity, comp);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -312,10 +306,6 @@ static int lua_engine_get_spot_light(lua_State *state) noexcept {
 // Lua: engine.set_spot_light(entity, r, g, b, dx, dy, dz, intensity, radius,
 //                            innerAngle, outerAngle [, cast_shadow]) → boolean
 static int lua_engine_set_spot_light(lua_State *state) noexcept {
-  if (lua_gettop(state) < 11) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
     lua_pushboolean(state, 0);
@@ -327,17 +317,17 @@ static int lua_engine_set_spot_light(lua_State *state) noexcept {
     return 1;
   }
   runtime::SpotLightComponent comp{};
-  comp.color.x = static_cast<float>(luaL_checknumber(state, 2));
-  comp.color.y = static_cast<float>(luaL_checknumber(state, 3));
-  comp.color.z = static_cast<float>(luaL_checknumber(state, 4));
-  comp.direction.x = static_cast<float>(luaL_checknumber(state, 5));
-  comp.direction.y = static_cast<float>(luaL_checknumber(state, 6));
-  comp.direction.z = static_cast<float>(luaL_checknumber(state, 7));
-  comp.intensity = static_cast<float>(luaL_checknumber(state, 8));
-  comp.radius = static_cast<float>(luaL_checknumber(state, 9));
-  comp.innerConeAngle = static_cast<float>(luaL_checknumber(state, 10));
-  comp.outerConeAngle = static_cast<float>(luaL_checknumber(state, 11));
-  comp.castShadow = lua_toboolean(state, 12) != 0;
+  int arg = 2;
+  if (!read_vec3_arg(state, &arg, &comp.color) ||
+      !read_vec3_arg(state, &arg, &comp.direction) ||
+      !read_finite_number_arg(state, arg, &comp.intensity) ||
+      !read_finite_number_arg(state, arg + 1, &comp.radius) ||
+      !read_finite_number_arg(state, arg + 2, &comp.innerConeAngle) ||
+      !read_finite_number_arg(state, arg + 3, &comp.outerConeAngle)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  comp.castShadow = lua_toboolean(state, arg + 4) != 0;
   const bool ok = apply_or_queue_spot_light_component(entity, comp);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;

@@ -168,8 +168,9 @@ int lua_engine_stop_sound(lua_State *state) noexcept {
 int lua_engine_play_sound_at(lua_State *state) noexcept {
   math::Vec3 position{};
   float volume = 1.0F;
-  if (!lua_isnumber(state, 1) || !read_vec3_args(state, 2, &position) ||
-      !read_optional_finite_number_arg(state, 5, 1.0F, &volume)) {
+  int arg = 2;
+  if (!lua_isnumber(state, 1) || !read_vec3_arg(state, &arg, &position) ||
+      !read_optional_finite_number_arg(state, arg, 1.0F, &volume)) {
     lua_pushboolean(state, 0);
     return 1;
   }
