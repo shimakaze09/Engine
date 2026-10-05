@@ -1038,6 +1038,11 @@ bool read_script_properties_component(
     if (!script_properties_set(&component, name, value)) {
       return false;
     }
+    // Read by position, so look it up by name too: only a lookup records
+    // a member as read, and a loader names every unrecorded key as one it
+    // will lose on the next save.
+    core::JsonValue lookedUp{};
+    static_cast<void>(parser.get_object_field(object, name, &lookedUp));
   }
   *outComponent = component;
   return true;
