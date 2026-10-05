@@ -52,6 +52,7 @@
 
 #include <stb_image.h>
 
+#include "editor_autosave.h"
 #include "editor_commands.h"
 #include "editor_console_capture.h"
 #include "editor_entity_rename.h"
@@ -380,6 +381,9 @@ void shutdown_editor() noexcept {
 
   // A camera drag in progress lets the mouse go before the editor does.
   cancel_view_drag(editor_session().sceneDrag);
+  // Clean unless the run is ending on a fatal: the quit prompt has
+  // already settled unsaved changes.
+  autosave_end_session();
 
   // Persisted while the context still exists; a failed write leaves the
   // previously stored layout intact rather than emptying it.
@@ -442,7 +446,13 @@ void editor_new_frame() noexcept {
   // refreshes the title bar before drawing, so both reflect this frame's
   // document state rather than lagging one frame behind.
   scene_document_poll_dialog_result();
+  // Before the startup scene, which waits while the previous session's
+  // copy is offered for recovery.
+  if (has_open_project() && (editor_session().world != nullptr)) {
+    static_cast<void>(autosave_begin_session());
+  }
   scene_document_open_startup_scene();
+  static_cast<void>(autosave_tick(core::platform_ticks_ns()));
   scene_document_update_window_title();
 
   ImGui_ImplBgfx_NewFrame();

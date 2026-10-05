@@ -7,6 +7,7 @@ engine_add_module_library(engine_editor
     src/editor.cpp
     src/editor_asset_index.cpp
     src/editor_asset_create.cpp
+    src/editor_autosave.cpp
     src/editor_asset_labels.cpp
     src/editor_asset_usages.cpp
     src/editor_import_settings.cpp

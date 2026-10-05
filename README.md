@@ -270,10 +270,18 @@ or has an unclosed quote is refused with a message rather than run in part.
 If the editor has to close on an internal error or a graphics-device failure
 (a driver reset, a lost GPU), it first saves the unsaved scene to `Recovery/`
 in the project's per-user data directory, as Unity keeps a `_Recovery`
-folder, and the error box names the file; open it with File > Open Scene.
-During Play the copy is the scene as it was before Play. A device failure
-exits with code 4 (`engine_integration_fatal_recovery`,
+folder, and the error box names the file. During Play the copy is the scene
+as it was before Play. A device failure exits with code 4
+(`engine_integration_fatal_recovery`,
 `engine_integration_fatal_device_recovery`).
+
+While a scene has unsaved changes the editor also copies it every five minutes
+to `Autosave/` in the same directory, never over the scene's file, as Unreal
+autosaves; Edit > Preferences sets the interval, or 0 for off. When the editor
+next opens a project after a crash, a kill or a fatal error, it offers the last
+copy before the startup scene loads: **Recover** opens it as the scene, unsaved,
+so Save replaces the file; **Inspect** opens it untitled; **Discard** opens the
+project as usual (`engine_unit_editor_autosave`).
 
 F9, the Game view's Screenshot button, Edit > Take Screenshot or the
 `screenshot` console command saves what the Game view shows as a PNG under

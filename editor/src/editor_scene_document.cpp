@@ -25,6 +25,7 @@
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
+#include "editor_autosave.h"
 #include "editor_commands.h"
 #include "editor_material_edit.h"
 #include "editor_session.h"
@@ -231,6 +232,34 @@ bool perform_scene_open(const char *path) noexcept {
   session.document.lastSaveError[0] = '\0';
   record_disk_fingerprint(session.document);
   recent_scenes_add(path);
+  return true;
+}
+
+bool perform_scene_recover(const char *copyPath,
+                           const char *authoredPath) noexcept {
+  EditorSession &session = editor_session();
+  if ((copyPath == nullptr) || (copyPath[0] == '\0') ||
+      !world_can_load_scene()) {
+    return false;
+  }
+  if (!runtime::load_scene(*session.world, copyPath)) {
+    return false;
+  }
+
+  reset_session_for_scene_switch();
+  reset_document_identity(session.document);
+  if ((authoredPath != nullptr) && (authoredPath[0] != '\0')) {
+    std::snprintf(session.document.path, sizeof(session.document.path), "%s",
+                  authoredPath);
+    session.document.hasPath = true;
+    set_display_name_from_path(session.document, authoredPath);
+    // The file as it is now, so a Save over it is not refused as an
+    // outside change: choosing Recover is choosing to replace it.
+    record_disk_fingerprint(session.document);
+  }
+  session.document.savedHistoryToken = session.commandHistory.current_token();
+  // Nothing on disk holds this content yet.
+  session.document.unrecordedEdit = true;
   return true;
 }
 
@@ -799,7 +828,8 @@ void scene_document_arm_startup_scene() noexcept {
 
 void scene_document_open_startup_scene() noexcept {
   EditorSession &session = editor_session();
-  if (!session.document.startupScenePending || (session.world == nullptr)) {
+  if (!session.document.startupScenePending || (session.world == nullptr) ||
+      autosave_recovery_pending()) {
     return;
   }
   session.document.startupScenePending = false;

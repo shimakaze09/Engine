@@ -116,6 +116,13 @@ bool perform_scene_new() noexcept;
 /// transactional). Callers must have already resolved unsaved changes;
 /// use request_scene_open for the gated entry point.
 bool perform_scene_open(const char *path) noexcept;
+/// Loads the recovery copy at `copyPath` and adopts it unsaved: as the
+/// scene at `authoredPath` when one is given, so Save writes it there, or
+/// as an untitled scene when `authoredPath` is empty. The authored file
+/// is not read or written, and Recent Scenes is unchanged. Same failure
+/// contract as perform_scene_open.
+bool perform_scene_recover(const char *copyPath,
+                           const char *authoredPath) noexcept;
 /// Saves to the current document path; false when the document has no
 /// path yet, the world is not editable, or the atomic write failed (the
 /// previous file and dirty status are both left untouched on failure).

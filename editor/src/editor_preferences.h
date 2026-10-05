@@ -1,9 +1,9 @@
 // Declares the editor's own preferences (the CJK font file, the main
-// window's geometry, the gizmo's axes, the Scene grid and rebound
-// shortcuts) and the Preferences window that edits them. They persist in
-// the editor's layout file, through an ImGui settings section, so they
-// are staged and replaced atomically with the layout rather than kept in
-// a file of their own.
+// window's geometry, the gizmo's axes, the Scene grid, the autosave
+// interval and rebound shortcuts) and the Preferences window that edits
+// them. They persist in the editor's layout file, through an ImGui
+// settings section, so they are staged and replaced atomically with the
+// layout rather than kept in a file of their own.
 
 #pragma once
 

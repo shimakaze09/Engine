@@ -1,7 +1,8 @@
 // Declares the editor's recovery copy: when a run ends fatally, the
 // unsaved scene is written to the project's Recovery/ folder so the work
 // survives the crash, as Unity keeps open scenes in a _Recovery folder and
-// Unreal restores its autosaves.
+// Unreal restores its autosaves. The copy is recorded in the autosave
+// manifest, so the next launch offers it (editor_autosave.h).
 
 #pragma once
 

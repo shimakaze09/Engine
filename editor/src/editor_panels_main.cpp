@@ -4,6 +4,7 @@
 #include "editor_panels_main.h"
 
 #include "editor_asset_place.h"
+#include "editor_autosave.h"
 #include "editor_commands.h"
 #include "editor_entity_menus.h"
 #include "editor_entity_rename.h"
@@ -122,6 +123,62 @@ static void draw_unsaved_changes_prompt() noexcept {
     }
 
     if (!scene_document_prompt_open()) {
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+}
+
+/// Draws the Recover/Inspect/Discard modal the first frame of a session
+/// raises when the last session did not end cleanly and left an unsaved
+/// copy (editor_autosave.h decides; this only presents it). The startup
+/// scene waits for the choice.
+static void draw_recovery_prompt() noexcept {
+  const AutosaveRecord *record = autosave_pending_recovery();
+  if (record == nullptr) {
+    return;
+  }
+  constexpr const char *kPopupId = "Recover Unsaved Work###autosave_recovery";
+  if (!ImGui::IsPopupOpen(kPopupId)) {
+    ImGui::OpenPopup(kPopupId);
+  }
+  const ImGuiViewport *viewport = ImGui::GetMainViewport();
+  if (viewport != nullptr) {
+    ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing,
+                            ImVec2(0.5F, 0.5F));
+  }
+  if (ImGui::BeginPopupModal(kPopupId, nullptr,
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::TextUnformatted("The last editor session did not end cleanly.");
+    ImGui::Text("It kept an unsaved copy of \"%s\" from %s%s.",
+                record->sceneName, record->savedAt,
+                record->beforePlay ? ", as it was before Play" : "");
+    if (record->scenePath[0] != '\0') {
+      ImGui::TextDisabled("Scene: %s", record->scenePath);
+    }
+    ImGui::TextDisabled("Copy: %s", record->file);
+    const char *error = autosave_recovery_error();
+    if (error[0] != '\0') {
+      ImGui::TextColored(ImVec4(0.9F, 0.35F, 0.35F, 1.0F), "%s", error);
+    }
+    if (ImGui::Button("Recover")) {
+      static_cast<void>(autosave_choose_recovery(RecoveryChoice::Recover));
+    }
+    ImGui::SetItemTooltip("Open the copy as the scene, unsaved. Save replaces "
+                          "the scene's file; until then it is unchanged.");
+    ImGui::SameLine();
+    if (ImGui::Button("Inspect")) {
+      static_cast<void>(autosave_choose_recovery(RecoveryChoice::Inspect));
+    }
+    ImGui::SetItemTooltip("Open the copy as an untitled scene, to look at or "
+                          "Save As elsewhere. The scene's file is unchanged.");
+    ImGui::SameLine();
+    if (ImGui::Button("Discard")) {
+      static_cast<void>(autosave_choose_recovery(RecoveryChoice::Discard));
+    }
+    ImGui::SetItemTooltip("Open the project as usual. The copy stays on disk "
+                          "until a later autosave replaces it.");
+    if (!autosave_recovery_pending()) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
@@ -414,6 +471,7 @@ void draw_main_menu_bar() noexcept {
 
   draw_unsaved_changes_prompt();
   draw_disk_conflict_prompt();
+  draw_recovery_prompt();
 }
 
 /// A toolbar button that runs `action` through the action table: its live
