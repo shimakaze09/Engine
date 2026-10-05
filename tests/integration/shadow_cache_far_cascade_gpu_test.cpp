@@ -33,13 +33,6 @@
 //                    takes effect;
 //   after-vsync-off  a settled frame on which a reset turning vsync off
 //                    takes effect, as the fixture's does.
-//
-// On Direct3D 12 the device presents two empty frames before engine content
-// (render_device_bgfx.cpp), because the device's second frame has been seen
-// to lose its work on WARP even with no reset (#1223). There each frame
-// named above is two device frames later than the process count says, and
-// the after-boot entries show no content lands on the frame that can be
-// lost.
 #include "../gpu_scene_fixture.h"
 
 #include <cmath>

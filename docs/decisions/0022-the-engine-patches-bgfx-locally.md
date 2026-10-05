@@ -13,14 +13,12 @@ once and the process's first command list counts as finished as soon as
 it is submitted. Its upload buffers are released before the GPU has run
 its copies, so the GPU can read freed memory.
 
-This was first taken for the cause of #1223, where WARP loses the
-device's second frame of GPU work. It is not the whole cause: with the fix
-applied, the Windows Release lane still failed
+This was first taken for the cause of #1223, where WARP loses one early
+frame's GPU work. It is not that cause: with the fix applied, the Windows
+Release lane still failed
 `engine_integration_shadow_cache_far_cascade_gpu_after_boot_unchanged`
 (job 111535390413). The fix stays because the early release is a defect
-on its own; #1223 is held off by the Direct3D 12 device's two empty
-warm-up frames (`renderer/src/render_device_bgfx.cpp`) until its cause is
-found.
+on its own.
 
 There were three options for carrying a fix like this:
 
