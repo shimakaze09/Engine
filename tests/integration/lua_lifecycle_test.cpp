@@ -353,6 +353,13 @@ function verify_demo_scripts()
     engine.set_friction = function(...) return true end
     engine.set_roughness = function(...) return true end
     engine.set_metallic = function(...) return true end
+    -- The stub entity carries no overrides, so each property reads its
+    -- script default, as engine.get_property answers then.
+    engine.get_property = function(_entity, name)
+        local declared = player.properties[name]
+        if type(declared) == "table" then return declared.default end
+        return declared
+    end
 
     player.on_begin_play(42)
     keys = {

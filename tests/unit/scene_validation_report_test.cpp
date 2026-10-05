@@ -196,6 +196,35 @@ int main() {
         "every key the writer emits is read back");
   }
 
+  // --- Script property overrides are read keys, not unknown ones ---
+  // Their names are the script's, so the codec walks the object by
+  // position; observed on 2026-10-05, engine_validate reported every
+  // override in a saved scene as a key that would be lost on the next save.
+  {
+    ctx.check(core::vfs_write_text("assets/scene_validation_props.lua",
+                                   "-- props\n", 9U),
+              "write the overridden script");
+    core::ValidationReport report{};
+    g_sceneWarnings = 0;
+    const std::string json =
+        "{\"version\":6,\"entities\":[{\"persistentId\":30,\"components\":{"
+        "\"ScriptComponent\":\"assets/scene_validation_props.lua\","
+        "\"ScriptProperties\":{\"speed\":2.5,\"lives\":3,\"label\":\"x\","
+        "\"armed\":true}}}]}";
+    ctx.check(load(*world, json, &report) && report.clean() &&
+                  (g_sceneWarnings == 0),
+              "overrides load with no finding and no warning");
+    std::unique_ptr<char[]> saved{};
+    std::size_t savedSize = 0U;
+    core::ValidationReport reloaded{};
+    ctx.check(
+        rt::save_scene(*world, &saved, &savedSize) &&
+            load(*world, std::string(saved.get(), savedSize), &reloaded) &&
+            reloaded.clean(),
+        "saved overrides are read back with no finding");
+    static_cast<void>(std::remove("scene_validation_props.lua"));
+  }
+
   // --- Past 32 unknown keys the log stops listing them ---
   {
     core::ValidationReport report{};

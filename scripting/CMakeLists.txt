@@ -20,6 +20,8 @@ add_custom_command(
 engine_add_module_library(engine_scripting
     SOURCES
     src/scripting.cpp
+    src/script_property_scan.cpp
+    src/script_property_bindings.cpp
     src/deterministic_math_library.cpp
     src/animation_bindings.cpp
     src/asset_bindings.cpp

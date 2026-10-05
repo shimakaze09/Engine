@@ -413,6 +413,57 @@ the last scene load, or one naming a destroyed entity. The first such
 call from each script line logs a Warning naming the file, the line, the
 binding and the reason (`engine_integration_lua_entity_argument_report`).
 
+A script's tunables are properties: values each entity using the script
+sets in the Inspector instead of in the script's source, as Unity shows a
+MonoBehaviour's public fields. The script declares them in one literal
+table at its top level, and reads them for an entity with
+`engine.get_property(self, name)`:
+
+```lua
+local M = {}
+M.properties = {
+    speed = 0.25,                       -- float: a number with a '.'
+    lives = 3,                          -- integer
+    label = "Player",                   -- string
+    enabled = true,                     -- bool
+    amplitude = { type = "float", default = 2.0, min = 0.0, max = 10.0,
+                  tooltip = "How far the platform travels" },
+}
+
+function M.on_tick(self, dt)
+    local speed = engine.get_property(self, "speed")
+end
+```
+
+- **Inspector.** The Script section shows each declared property as a
+  typed field under the script's path (`engine_unit_editor_script_properties`).
+  - The editor reads the declarations from the script's text without
+    running it, as Defold's editor reads `go.property`.
+  - Only literals are read: a computed default or a declaration inside a
+    function is listed under the section with its line
+    (`engine_unit_script_property_scan`).
+  - A suite runs every shipped script in a Lua VM and checks the
+    Inspector reads the same properties, types and defaults
+    (`engine_unit_script_property_parity`).
+- **Storage.** An entity stores only the values that differ from the
+  script's defaults, in `"ScriptProperties"` in the scene or prefab.
+  - Changing a default in the script reaches every entity that did not
+    change it.
+  - A changed value is highlighted and its right-click menu offers Reset
+    to Default.
+  - A value the script no longer declares is kept and listed with Remove,
+    never dropped (`engine_unit_world_script_properties`).
+- **Reading in Lua.** `engine.get_property` keeps Lua's integer or float
+  subtype (`engine_integration_lua_script_properties`).
+  - A stored value whose type the script has since changed reads the
+    default.
+  - An undeclared name reads `nil`.
+  - Each such problem logs one Warning per script and property.
+- **Limits.** A script declares up to 16 properties of the types bool,
+  integer, float and string. A string holds up to 47 bytes. Vector,
+  colour, entity and asset properties come with #134's later slices and
+  #1122.
+
 Current script conventions in the sample's `assets/`:
 
 - Scene-level module (`assets/main.lua`)
@@ -452,7 +503,10 @@ Current script conventions in the sample's `assets/`:
   physics props when play begins (`assets/samples/playground.lua`, run by
   `assets/samples/playground.scene`; `engine_integration_playground_sample`
   plays it)
-- Entity behavior module example (`assets/scripts/player.lua`)
+- Entity behavior module example (`assets/scripts/player.lua`); the
+  island's platform, rock, player and controller scripts declare their
+  tunables as properties, so two platforms sweep differently from one
+  script
 - Reusable utility module example (`assets/lib/utils.lua`)
 
 Current scripting/runtime support in the tree includes:

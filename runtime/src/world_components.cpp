@@ -5,6 +5,7 @@
 
 #include "engine/runtime/world.h"
 
+#include "engine/core/diagnostic.h"
 #include "engine/core/hash.h"
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
@@ -14,7 +15,6 @@
 #include "engine/runtime/reflect_types.h"
 #include "primitive_hull_build.h"
 #include "world_internal.h"
-#include "engine/core/diagnostic.h"
 
 #include <array>
 #include <cassert>
@@ -203,14 +203,12 @@ void install_provenance_hull(physics::PhysicsContext &context, Entity entity,
                   "convex hull rebuild failed for entity %u (source %u) — "
                   "collider collides as the axis-aligned box of its half "
                   "extents",
-                  entity.index,
-                  static_cast<unsigned>(collider.hullSource));
+                  entity.index, static_cast<unsigned>(collider.hullSource));
     log_entity_warning(persistentId, message);
   }
 }
 
 } // namespace
-
 
 template <typename Set, typename Component>
 core::Status World::add_component_checked(Set &set, Entity entity,
@@ -337,9 +335,10 @@ bool World::add_transform(Entity entity, const Transform &incoming) noexcept {
   const bool movesGeometry =
       (m_colliders.get_ptr(entity) != nullptr) ||
       (hadTransform && (m_transformNodes[entity.index].firstChild != 0U));
-  const Entity ownerBefore = (movesGeometry && hadTransform)
-                                 ? find_rigid_body_owner(entity, m_readStateIndex)
-                                 : kInvalidEntity;
+  const Entity ownerBefore =
+      (movesGeometry && hadTransform)
+          ? find_rigid_body_owner(entity, m_readStateIndex)
+          : kInvalidEntity;
   // A collider moved by its transform (a teleport, a script set_position)
   // leaves what rested on it behind; that wakes and falls.
   if (hadTransform && (m_colliders.get_ptr(entity) != nullptr)) {
@@ -472,7 +471,8 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
   // owned them until now.
   const bool hadBody = m_rigidBodies.contains(entity);
   const Entity previousOwner =
-      hadBody ? kInvalidEntity : find_rigid_body_owner(entity, m_readStateIndex);
+      hadBody ? kInvalidEntity
+              : find_rigid_body_owner(entity, m_readStateIndex);
   if (!m_rigidBodies.add(entity, sanitized)) {
     note_refusal(core::FailureKind::CapacityExhausted);
     return false;
@@ -586,10 +586,11 @@ math::Vec3 World::derived_inverse_inertia(Entity body,
   return physics::finish_inverse_inertia(accumulator, inverseMass);
 }
 
-void World::accumulate_owned_collider_inertia(
-    Entity body, Entity entity, const math::Vec3 &offset,
-    const math::Quat &rotation, physics::InertiaAccumulator *out,
-    std::size_t depth) noexcept {
+void World::accumulate_owned_collider_inertia(Entity body, Entity entity,
+                                              const math::Vec3 &offset,
+                                              const math::Quat &rotation,
+                                              physics::InertiaAccumulator *out,
+                                              std::size_t depth) noexcept {
   // Bounded like every hierarchy walk: a chain deeper than the entity
   // count cannot exist without a cycle, which add_transform refuses.
   if ((depth >= kMaxEntities) || (m_rigidBodies.get_ptr(entity) != nullptr)) {
@@ -600,8 +601,8 @@ void World::accumulate_owned_collider_inertia(
     return;
   }
   const math::Quat unitRotation = math::normalize(rotation);
-  const math::Vec3 placement = math::add(
-      offset, math::rotate_vector(local->position, unitRotation));
+  const math::Vec3 placement =
+      math::add(offset, math::rotate_vector(local->position, unitRotation));
   const math::Quat orientation =
       math::mul(unitRotation, math::normalize(local->rotation));
   const Collider *collider = m_colliders.get_ptr(entity);
@@ -725,8 +726,8 @@ bool World::add_mesh_component(Entity entity,
                   entity.index);
     log_entity_warning(m_entityPersistentIds[entity.index], message);
   }
-  return static_cast<bool>(add_component_checked(m_meshComponents, entity, sanitized,
-                               "add_mesh_component"));
+  return static_cast<bool>(add_component_checked(
+      m_meshComponents, entity, sanitized, "add_mesh_component"));
 }
 
 bool World::remove_mesh_component(Entity entity) noexcept {
@@ -832,8 +833,7 @@ bool World::add_name_component(Entity entity,
   // than truncated: a cut name would be findable under a spelling the
   // author never wrote, and the entity's existing name stays in place.
   NameComponent safe{};
-  if (!core::copy_string_strict(safe.name, sizeof(safe.name),
-                                component.name)) {
+  if (!core::copy_string_strict(safe.name, sizeof(safe.name), component.name)) {
     log_identity_overflow("add_name_component", "name",
                           NameComponent::kMaxNameLength);
     note_refusal(core::FailureKind::InvalidArgument);
@@ -933,8 +933,8 @@ bool World::add_light_component(Entity entity,
     note_refusal(core::FailureKind::InvalidArgument);
     return false;
   }
-  return static_cast<bool>(add_component_checked(m_lightComponents, entity, component,
-                               "add_light_component"));
+  return static_cast<bool>(add_component_checked(
+      m_lightComponents, entity, component, "add_light_component"));
 }
 
 bool World::remove_light_component(Entity entity) noexcept {
@@ -976,8 +976,8 @@ Entity World::light_entity_at(std::size_t index) const noexcept {
 
 bool World::add_point_light_component(
     Entity entity, const PointLightComponent &component) noexcept {
-  return static_cast<bool>(add_component_checked(m_pointLights, entity, component,
-                               "add_point_light_component"));
+  return static_cast<bool>(add_component_checked(
+      m_pointLights, entity, component, "add_point_light_component"));
 }
 
 bool World::remove_point_light_component(Entity entity) noexcept {
@@ -1016,8 +1016,8 @@ Entity World::point_light_entity_at(std::size_t index) const noexcept {
 
 bool World::add_spot_light_component(
     Entity entity, const SpotLightComponent &component) noexcept {
-  return static_cast<bool>(add_component_checked(m_spotLights, entity, component,
-                               "add_spot_light_component"));
+  return static_cast<bool>(add_component_checked(
+      m_spotLights, entity, component, "add_spot_light_component"));
 }
 
 bool World::remove_spot_light_component(Entity entity) noexcept {
@@ -1056,8 +1056,8 @@ Entity World::spot_light_entity_at(std::size_t index) const noexcept {
 
 bool World::add_reflection_probe_component(
     Entity entity, const ReflectionProbeComponent &component) noexcept {
-  return static_cast<bool>(add_component_checked(m_reflectionProbes, entity, component,
-                               "add_reflection_probe_component"));
+  return static_cast<bool>(add_component_checked(
+      m_reflectionProbes, entity, component, "add_reflection_probe_component"));
 }
 
 bool World::remove_reflection_probe_component(Entity entity) noexcept {
@@ -1113,8 +1113,8 @@ World::get_reflection_probe_component_ptr(Entity entity) const noexcept {
 
 bool World::add_scene_capture_component(
     Entity entity, const SceneCaptureComponent &component) noexcept {
-  return static_cast<bool>(add_component_checked(m_sceneCaptures, entity, component,
-                               "add_scene_capture_component"));
+  return static_cast<bool>(add_component_checked(
+      m_sceneCaptures, entity, component, "add_scene_capture_component"));
 }
 
 bool World::remove_scene_capture_component(Entity entity) noexcept {
@@ -1260,8 +1260,7 @@ bool World::get_animation_component(
                                "get_animation_component");
 }
 
-AnimationComponent *World::get_animation_component_ptr(
-    Entity entity) noexcept {
+AnimationComponent *World::get_animation_component_ptr(Entity entity) noexcept {
   return get_component_ptr_checked(m_animationComponents, entity);
 }
 
@@ -1394,8 +1393,8 @@ Entity World::nav_agent_entity_at(std::size_t index) const noexcept {
 
 bool World::add_spring_arm(Entity entity,
                            const SpringArmComponent &component) noexcept {
-  return static_cast<bool>(add_component_checked(m_springArms, entity, component,
-                               "add_spring_arm"));
+  return static_cast<bool>(
+      add_component_checked(m_springArms, entity, component, "add_spring_arm"));
 }
 
 bool World::remove_spring_arm(Entity entity) noexcept {
@@ -1448,8 +1447,8 @@ bool World::add_camera_component(Entity entity,
     note_refusal(core::FailureKind::InvalidArgument);
     return false;
   }
-  return static_cast<bool>(add_component_checked(m_cameraComponents, entity, component,
-                               "add_camera_component"));
+  return static_cast<bool>(add_component_checked(
+      m_cameraComponents, entity, component, "add_camera_component"));
 }
 
 bool World::remove_camera_component(Entity entity) noexcept {
@@ -1517,7 +1516,7 @@ bool World::get_collider_range(std::size_t startIndex, std::size_t count,
 bool World::add_sky_light_component(
     Entity entity, const SkyLightComponent &component) noexcept {
   return static_cast<bool>(add_component_checked(m_skyLights, entity, component,
-                               "add_sky_light_component"));
+                                                 "add_sky_light_component"));
 }
 
 bool World::remove_sky_light_component(Entity entity) noexcept {
@@ -1546,8 +1545,7 @@ std::size_t World::sky_light_count() const noexcept {
   return m_skyLights.count();
 }
 
-const SkyLightComponent *
-World::sky_light_at(std::size_t index) const noexcept {
+const SkyLightComponent *World::sky_light_at(std::size_t index) const noexcept {
   if (index >= m_skyLights.count()) {
     return nullptr;
   }
@@ -1561,8 +1559,7 @@ Entity World::sky_light_entity_at(std::size_t index) const noexcept {
   return m_skyLights.entity_at(index);
 }
 
-SkyLightComponent *
-World::get_sky_light_component_ptr(Entity entity) noexcept {
+SkyLightComponent *World::get_sky_light_component_ptr(Entity entity) noexcept {
   return get_component_ptr_checked(m_skyLights, entity);
 }
 
@@ -1633,6 +1630,36 @@ std::size_t World::find_entities_by_tag(const char *tag, Entity *out,
     out[slot] = entity;
   }
   return found;
+}
+
+bool World::add_script_properties(
+    Entity entity, const ScriptPropertiesComponent &component) noexcept {
+  if (!script_properties_are_valid(component)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_script_properties rejected an override set: each "
+                      "name is a Lua identifier of at most 31 bytes, named "
+                      "once, at most 16, each value a known type");
+    note_refusal(core::FailureKind::InvalidArgument);
+    return false;
+  }
+  return static_cast<bool>(add_component_checked(
+      m_scriptProperties, entity, component, "add_script_properties"));
+}
+
+bool World::remove_script_properties(Entity entity) noexcept {
+  return remove_component_checked(m_scriptProperties, entity,
+                                  "remove_script_properties");
+}
+
+bool World::get_script_properties(
+    Entity entity, ScriptPropertiesComponent *outComponent) const noexcept {
+  return get_component_checked(m_scriptProperties, entity, outComponent,
+                               "get_script_properties");
+}
+
+const ScriptPropertiesComponent *
+World::get_script_properties_ptr(Entity entity) const noexcept {
+  return get_component_ptr_checked(m_scriptProperties, entity);
 }
 
 } // namespace engine::runtime

@@ -36,5 +36,7 @@ inline constexpr const char *kJsonKeyAnimationComponent =
 inline constexpr const char *kJsonKeyCameraComponent = "CameraComponent";
 inline constexpr const char *kJsonKeySkyLightComponent = "SkyLightComponent";
 inline constexpr const char *kJsonKeyTagSetComponent = "Tags";
+inline constexpr const char *kJsonKeyScriptPropertiesComponent =
+    "ScriptProperties";
 
 } // namespace engine::runtime

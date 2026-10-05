@@ -13,9 +13,15 @@
 -- and is re-acquired after a hot reload.
 local M = {}
 
-local TRIGGER_RADIUS = 1.6
-local RESET_BELOW_Y = -8.0
-local REARM_DISTANCE = 7.0
+-- Each rock's own values, shown in the Inspector.
+M.properties = {
+    trigger_radius = { type = "float", default = 1.6, min = 0.0,
+                       tooltip = "How close beneath the rock the player must walk to drop it" },
+    reset_below_y = { type = "float", default = -8.0,
+                      tooltip = "Height below which a dropped rock has left the world" },
+    rearm_distance = { type = "float", default = 7.0, min = 0.0,
+                       tooltip = "How far the player must be before the rock returns to its perch" },
+}
 
 local g_instances = {}
 local g_alarm = nil
@@ -91,8 +97,9 @@ function M.on_tick(self, _dt)
 
     if s.state == "armed" then
         local dist_sq, py = player_distance_sq(x, z)
+        local trigger = engine.get_property(self, "trigger_radius")
         if dist_sq ~= nil and py ~= nil and py < y
-            and dist_sq <= TRIGGER_RADIUS * TRIGGER_RADIUS then
+            and dist_sq <= trigger * trigger then
             s.state = "dropped"
             if g_alarm ~= nil and g_alarm ~= 0 then
                 engine.play_sound_at(g_alarm, x, y, z, 0.8)
@@ -103,9 +110,9 @@ function M.on_tick(self, _dt)
     end
 
     local dist_sq = player_distance_sq(s.perch.x, s.perch.z)
-    local out_of_world = y < RESET_BELOW_Y
-    local player_far = dist_sq ~= nil
-        and dist_sq > REARM_DISTANCE * REARM_DISTANCE
+    local rearm = engine.get_property(self, "rearm_distance")
+    local out_of_world = y < engine.get_property(self, "reset_below_y")
+    local player_far = dist_sq ~= nil and dist_sq > rearm * rearm
     if out_of_world and (player_far or dist_sq == nil) then
         s.state = "armed"
         engine.set_acceleration(self, 0.0, 0.0, 0.0)

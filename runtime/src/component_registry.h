@@ -80,7 +80,9 @@
   X(NavMeshSurfaceComponent, kJsonKeyNavMeshSurfaceComponent,                  \
     get_nav_mesh_surface, add_nav_mesh_surface, remove_nav_mesh_surface)       \
   X(NavAgentComponent, kJsonKeyNavAgentComponent, get_nav_agent,               \
-    add_nav_agent, remove_nav_agent)
+    add_nav_agent, remove_nav_agent)                                           \
+  X(ScriptPropertiesComponent, kJsonKeyScriptPropertiesComponent,              \
+    get_script_properties, add_script_properties, remove_script_properties)
 
 namespace engine::runtime {
 

@@ -52,6 +52,8 @@ bool decode_prefab_component(const core::JsonParser &parser,
     return read_animation_component(parser, value, true, out);
   } else if constexpr (std::is_same_v<T, TagSetComponent>) {
     return read_tag_set_component(parser, value, out);
+  } else if constexpr (std::is_same_v<T, ScriptPropertiesComponent>) {
+    return read_script_properties_component(parser, value, out);
   } else if (value.type != core::JsonValue::Type::Object) {
     return false;
   } else if constexpr (std::is_same_v<T, Transform>) {
@@ -132,6 +134,9 @@ bool encode_prefab_component(core::JsonWriter &w, const char *key,
     return true;
   } else if constexpr (std::is_same_v<T, TagSetComponent>) {
     write_tag_set_component(w, key, component);
+    return true;
+  } else if constexpr (std::is_same_v<T, ScriptPropertiesComponent>) {
+    write_script_properties_component(w, key, component);
     return true;
   } else if constexpr (std::is_same_v<T, Collider>) {
     return write_collider_component(w, component);

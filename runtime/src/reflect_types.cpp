@@ -62,6 +62,12 @@ static_cast<void>(desc);
 // array of fixed char arrays, serialized and edited by hand.
 REFLECT_END()
 
+REFLECT_TYPE(engine::runtime::ScriptPropertiesComponent)
+static_cast<void>(desc);
+// Intentionally registers a zero-field descriptor: the overrides are a
+// fixed array of named typed values, serialized and edited by hand.
+REFLECT_END()
+
 REFLECT_TYPE(engine::runtime::ScriptComponent)
 static_cast<void>(desc);
 // Intentionally registers a zero-field descriptor. ScriptComponent::scriptPath

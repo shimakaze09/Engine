@@ -269,6 +269,11 @@ constexpr ComponentMetadata kComponentMetadataTable[] = {
      "Position, rotation, and scale. Every scene object owns one."},
     {"engine::runtime::NameComponent", "Name", "Core",
      "Display name. Every scene object owns one."},
+    {"engine::runtime::ScriptPropertiesComponent", "Script Properties",
+     "Gameplay",
+     "This entity's values for its script's properties, where they differ "
+     "from the script's defaults.",
+     "they are set in the Script section's property fields"},
     {"engine::runtime::TagSetComponent", "Tags", "Core",
      "Gameplay tags scripts find entities by "
      "(engine.find_entities_by_tag), up to 8 per entity.",

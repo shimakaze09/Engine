@@ -55,7 +55,8 @@ namespace engine::runtime {
   X(TagSetComponent, m_tagSets)                                                \
   X(CharacterControllerComponent, m_characterControllers)                      \
   X(NavMeshSurfaceComponent, m_navMeshSurfaces)                                \
-  X(NavAgentComponent, m_navAgents)
+  X(NavAgentComponent, m_navAgents)                                            \
+  X(ScriptPropertiesComponent, m_scriptProperties)
 
 #ifndef ENGINE_MAX_ENTITIES
 #define ENGINE_MAX_ENTITIES 65536U
@@ -162,6 +163,9 @@ public:
   /// Agents walking navigation meshes at once: the NPCs and enemies of a
   /// level; each also holds a path (runtime/nav_agent.h).
   static constexpr std::size_t kMaxNavAgentComponents = 256U;
+  /// Entities whose script properties differ from the script's defaults at
+  /// once: every tuned platform, pickup and enemy of a level, about 7 MB.
+  static constexpr std::size_t kMaxScriptPropertiesComponents = 4096U;
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
@@ -178,7 +182,7 @@ public:
       SpotLightComponent, ReflectionProbeComponent, SceneCaptureComponent,
       FoliagePatchComponent, AnimationComponent, CameraComponent,
       SkyLightComponent, TagSetComponent, CharacterControllerComponent,
-      NavMeshSurfaceComponent, NavAgentComponent>;
+      NavMeshSurfaceComponent, NavAgentComponent, ScriptPropertiesComponent>;
   /// Number of persistent component types, derived from the list above.
   static constexpr std::size_t kPersistentComponentTypeCount =
       std::tuple_size_v<PersistentComponentTypes>;
@@ -676,6 +680,28 @@ public:
   /// range.
   Entity nav_agent_entity_at(std::size_t index) const noexcept;
 
+  /// Adds or replaces the entity's script property overrides. Requires the
+  /// Input phase and a live entity. A set script_properties_are_valid
+  /// refuses (an invalid name or value, a repeated name, more than
+  /// kMaxOverrides) is refused whole with an Error and the entity's
+  /// overrides unchanged.
+  bool
+  add_script_properties(Entity entity,
+                        const ScriptPropertiesComponent &component) noexcept;
+  /// Removes the entity's script property overrides. Requires the Input
+  /// phase and a live entity; logs and returns false otherwise or when they
+  /// are absent.
+  bool remove_script_properties(Entity entity) noexcept;
+  /// Copies the entity's script property overrides into the out parameter;
+  /// logs and returns false for stale or dead entities or when absent.
+  bool
+  get_script_properties(Entity entity,
+                        ScriptPropertiesComponent *outComponent) const noexcept;
+  /// Pointer to the entity's script property overrides, or nullptr when the
+  /// handle is stale or they are absent (no logging).
+  const ScriptPropertiesComponent *
+  get_script_properties_ptr(Entity entity) const noexcept;
+
   /// Adds or replaces the entity's spring arm. Requires the Input phase and a
   /// live entity; logs and returns false otherwise or when storage is full.
   bool add_spring_arm(Entity entity,
@@ -1024,6 +1050,9 @@ private:
   using NavAgentSet =
       core::CompactSparseSet<Entity, NavAgentComponent, kMaxEntities,
                              kMaxNavAgentComponents>;
+  using ScriptPropertiesSet =
+      core::CompactSparseSet<Entity, ScriptPropertiesComponent, kMaxEntities,
+                             kMaxScriptPropertiesComponents>;
   using PointLightSet =
       core::CompactSparseSet<Entity, PointLightComponent, kMaxEntities,
                              kMaxPointLightComponents>;
@@ -1417,6 +1446,7 @@ private:
   CharacterControllerSet m_characterControllers{};
   NavMeshSurfaceSet m_navMeshSurfaces{};
   NavAgentSet m_navAgents{};
+  ScriptPropertiesSet m_scriptProperties{};
   PointLightSet m_pointLights{};
   SpotLightSet m_spotLights{};
   ReflectionProbeSet m_reflectionProbes{};

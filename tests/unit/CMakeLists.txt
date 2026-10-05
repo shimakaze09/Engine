@@ -593,6 +593,22 @@ engine_add_test_executable(engine_unit_scripting
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_script_property_scan
+    SOURCES
+    script_property_scan_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+)
+
+engine_add_test_executable(engine_unit_script_property_parity
+    SOURCES
+    script_property_parity_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    # Runs each script in a plain VM, the side of the parity it checks.
+    engine_lua
+)
+
 engine_add_test_executable(engine_unit_lua_error_diagnostic
     SOURCES
     lua_error_diagnostic_test.cpp
@@ -902,6 +918,13 @@ engine_add_test_executable(engine_unit_world_name_lookup
 engine_add_test_executable(engine_unit_world_tag_set
     SOURCES
     world_tag_set_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_world_script_properties
+    SOURCES
+    world_script_properties_test.cpp
     PRIVATE_DEPS
     engine_runtime
 )
@@ -1283,6 +1306,19 @@ engine_add_test_executable(engine_unit_editor_inspector_edit
 engine_add_test_executable(engine_unit_editor_entity_tags
     SOURCES
     editor_entity_tags_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_script_properties
+    SOURCES
+    editor_script_properties_test.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/editor/include
     ${CMAKE_SOURCE_DIR}/editor/src

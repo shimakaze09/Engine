@@ -17,6 +17,7 @@
 #include "editor_panels_inspector_custom.h"
 #include "editor_panels_inspector_generic.h"
 #include "editor_reference_pickers.h"
+#include "editor_script_properties.h"
 #include "editor_session.h"
 #include "engine/core/logging.h"
 #include "engine/renderer/command_buffer.h"
@@ -303,11 +304,13 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
         return modified;
       });
 
-  draw_component_section(entity, ComponentEditType::Script,
-                         "Script", &ComponentEditSnapshot::script,
-                         authoredEditable, false,
-                         true, [](runtime::ScriptComponent &c) {
-                           return draw_script_component_fields(c);
+  draw_component_section(entity, ComponentEditType::Script, "Script",
+                         &ComponentEditSnapshot::script, authoredEditable,
+                         false, true, [entity](runtime::ScriptComponent &c) {
+                           const bool modified =
+                               draw_script_component_fields(c);
+                           draw_script_property_fields(entity, c.scriptPath);
+                           return modified;
                          });
 
   draw_component_section(entity, ComponentEditType::Animation,
@@ -405,9 +408,10 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
         return modified;
       });
 }
-// 17 sections above cover every registry row except Name, Tags and
-// Transform; Name and Tags are rows under the entity header.
-static_assert(kComponentEditTypeCount == 20U,
+// 17 sections above cover every registry row except Name, Tags,
+// ScriptProperties and Transform; Name and Tags are rows under the entity
+// header, and the Script section draws the script's properties.
+static_assert(kComponentEditTypeCount == 21U,
               "a new persistent-component registry row needs both a section "
               "in draw_component_sections and an entry in "
               "editor_inspector_metadata's ComponentMetadata table");

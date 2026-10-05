@@ -40,6 +40,11 @@ void clear_entity_script_bindings() noexcept;
 /// Lua binding: Lua engine.require(path).
 int lua_engine_require(lua_State *state) noexcept;
 
+/// Pushes the module table the script at `path` returned, loading it when
+/// the cache does not hold it yet; false, with nothing pushed, when it
+/// does not load.
+bool push_entity_script_module(lua_State *state, const char *path) noexcept;
+
 /// Clears cached entity script modules and hot-reload state.
 void reset_entity_script_bindings() noexcept;
 

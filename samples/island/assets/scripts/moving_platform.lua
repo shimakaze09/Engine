@@ -1,7 +1,8 @@
 -- assets/scripts/moving_platform.lua
 --
 -- Oscillates a platform along X between its authored position and
--- AMPLITUDE units further. Author its Rigid Body with Body Type Kinematic:
+-- `amplitude` units further, a property each platform sets in the
+-- Inspector. Author its Rigid Body with Body Type Kinematic:
 -- a kinematic body follows its velocity exactly, feels no gravity, never
 -- sleeps and is never pushed back, and it is driven by velocity (not
 -- teleported) so contact friction carries a rider and the player
@@ -13,11 +14,17 @@
 -- module-local state would be silently shared between instances.
 local M = {}
 
--- Sweep sized so the far end stops just short of the goal islet's wall
--- (platform face 11.9 vs islet face 12.0): a kinematic body passes through
--- static geometry rather than stopping at it.
-local AMPLITUDE = 2.0
-local SPEED = 0.25
+-- Each platform's own values, shown in the Inspector. The default sweep
+-- stops the far end just short of the goal islet's wall (platform face
+-- 11.9 vs islet face 12.0): a kinematic body passes through static
+-- geometry rather than stopping at it.
+M.properties = {
+    amplitude = { type = "float", default = 2.0, min = 0.0,
+                  tooltip = "How far the platform travels along X" },
+    speed = { type = "float", default = 0.25, min = 0.0,
+              tooltip = "Sweeps per second" },
+}
+
 local TWO_PI = 2.0 * math.pi
 
 local g_instances = {}
@@ -54,8 +61,8 @@ function M.on_end_play(self)
 end
 
 -- Sweep position for a phase value: 0..1..0 across one cycle.
-local function sweep_x(base, phase)
-    return base.x + AMPLITUDE * (0.5 - 0.5 * math.cos(phase * TWO_PI))
+local function sweep_x(base, phase, amplitude)
+    return base.x + amplitude * (0.5 - 0.5 * math.cos(phase * TWO_PI))
 end
 
 -- Drives the body's velocity toward the next sweep sample so contacts see
@@ -65,12 +72,13 @@ function M.on_tick(self, dt)
     if s == nil or s.base == nil or dt <= 0.0 then
         return
     end
-    s.phase = s.phase + dt * SPEED
+    s.phase = s.phase + dt * engine.get_property(self, "speed")
     local x, y, z = engine.get_position(self)
     if x == nil then
         return
     end
-    local target_x = sweep_x(s.base, s.phase)
+    local target_x = sweep_x(s.base, s.phase,
+        engine.get_property(self, "amplitude"))
     engine.set_velocity(self, (target_x - x) / dt, (s.base.y - y) / dt,
         (s.base.z - z) / dt)
 end

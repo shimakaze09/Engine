@@ -630,6 +630,16 @@ engine_add_test_executable(engine_integration_lua_entity_tags
     integration
 )
 
+engine_add_test_executable(engine_integration_lua_script_properties
+    SOURCES
+    lua_script_properties_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_lua_trigger_events
     SOURCES
     lua_trigger_events_test.cpp

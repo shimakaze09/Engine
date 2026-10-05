@@ -12,6 +12,7 @@
 
 #include "engine/core/asset_identity.h"
 #include "engine/core/string_util.h"
+#include "engine/math/script_properties.h"
 #include "engine/math/vec3.h"
 
 namespace engine::math {
