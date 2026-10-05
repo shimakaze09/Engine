@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/math/mat4.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/collider.h"
 #include "engine/physics/physics.h"
@@ -106,6 +107,20 @@ bool set_heightfield_data(World &world, Entity entity,
 /// Entity's heightfield payload, or nullptr when none is set.
 const physics::HeightfieldData *get_heightfield_data(
     const World &world, Entity entity) noexcept;
+
+/// Installs `mesh` as the triangles the TriMesh collider on `entity`
+/// collides with (Input phase, like the collider itself).
+bool set_tri_mesh_data(World &world, Entity entity,
+                       const physics::TriMeshRef &mesh) noexcept;
+/// The mesh the TriMesh collider on `entity` collides with, or nullptr.
+const physics::TriMeshData *get_tri_mesh_data(const World &world,
+                                              Entity entity) noexcept;
+/// The world geometry of the collider on `entity` at `worldMatrix`, with
+/// the hull or mesh its shape uses; false when it has none to build.
+bool collider_world_geometry(
+    const World &world, Entity entity, const Collider &collider,
+    const math::Mat4 &worldMatrix,
+    physics::ColliderWorldGeometry *outGeometry) noexcept;
 
 // Physics queries (P1-M3-D)
 /// Returns the nearest maxHits intersections sorted by distance, normalizing

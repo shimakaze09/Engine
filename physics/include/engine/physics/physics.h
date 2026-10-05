@@ -4,6 +4,7 @@
 
 #include "engine/physics/collider.h"
 #include "engine/physics/physics_types.h"
+#include "engine/physics/tri_mesh.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -87,11 +88,8 @@ using TriggerDispatchFn = void (*)(const Entity *pairs,
 bool set_convex_hull_data(PhysicsContext &context, Entity entity,
                           const ConvexHullData &hull) noexcept;
 /// Returns convex hull payload data from the requested context.
-const ConvexHullData *
-get_convex_hull_data(const PhysicsContext &context, Entity entity) noexcept;
-/// Returns convex hull payload data for support-function callers.
-const ConvexHullData *get_hull_data_ptr(const PhysicsContext &context,
-                                        Entity entity) noexcept;
+const ConvexHullData *get_convex_hull_data(const PhysicsContext &context,
+                                           Entity entity) noexcept;
 /// Removes non-primitive shape payload data for an entity.
 void remove_shape_payloads(PhysicsContext &context, Entity entity) noexcept;
 /// Wakes every sleeping body with a collider whose bounds, as the last
@@ -122,8 +120,8 @@ get_collision_matrix(const PhysicsWorldView &world) noexcept;
 /// without end events, since every entity they name is gone.
 void reset_physics_content(PhysicsContext &context) noexcept;
 /// Drops the payloads that the given collider shape cannot consume, so a
-/// collider replaced with a different shape never keeps a stale hull or
-/// heightfield resident. Analytic shapes keep no payload at all.
+/// collider replaced with a different shape never keeps a stale hull,
+/// heightfield or mesh resident. Analytic shapes keep no payload at all.
 void prune_incompatible_shape_payloads(PhysicsContext &context, Entity entity,
                                        ColliderShape shape) noexcept;
 /// Sets the requested value for heightfield payload data.
@@ -132,5 +130,19 @@ bool set_heightfield_data(PhysicsContext &context, Entity entity,
 /// Returns heightfield payload data from the requested context.
 const HeightfieldData *
 get_heightfield_data(const PhysicsContext &context, Entity entity) noexcept;
+/// Installs `mesh` as the triangles the TriMesh collider on `entity`
+/// collides with, sharing it with every other collider that uses it.
+/// False, with nothing changed, for an empty reference or when
+/// kMaxTriMeshColliders colliders already have one.
+bool set_tri_mesh_data(PhysicsContext &context, Entity entity,
+                       const TriMeshRef &mesh) noexcept;
+/// Builds the world geometry of the collider on `entity` with the payload
+/// its shape uses (a hull, a mesh), as make_collider_world_geometry does.
+bool make_installed_collider_geometry(
+    const PhysicsContext &context, Entity entity, const Collider &collider,
+    const math::Mat4 &worldMatrix, ColliderWorldGeometry *outGeometry) noexcept;
+/// The mesh the TriMesh collider on `entity` collides with, or nullptr.
+const TriMeshData *get_tri_mesh_data(const PhysicsContext &context,
+                                     Entity entity) noexcept;
 
 } // namespace engine::physics

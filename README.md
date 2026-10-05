@@ -492,6 +492,22 @@ when at least one of the two bodies can move. Two colliders that cannot
 nothing, as in Unity, so overlapping level geometry costs no events
 (`engine_unit_collision_frame_events`).
 
+A **Mesh** collider (Shape: Mesh in the Inspector, which names the entity's
+own render mesh by default and offers a picker) collides with the triangles
+of a mesh asset, as Unity's MeshCollider and Godot's ConcavePolygonShape3D
+do, so an imported level needs no hand-placed boxes. It is static geometry:
+a triangle mesh has no volume, so one on a body that moves collides with
+nothing, and adding one there logs a warning. The engine builds a collision
+mesh (a BVH over the triangles) from the cooked mesh the first time a
+collider names it and shares it with every collider that names it; a mesh
+that cannot be built is logged once and its collider collides with nothing.
+Bodies rest on it, CCD stops fast ones at its triangles, and raycasts,
+sweeps, overlaps and the character controller meet the triangles rather
+than their bounds (`engine_unit_tri_mesh`, `engine_unit_tri_mesh_collision`,
+`engine_unit_collider_mesh_resolution`,
+`engine_integration_tri_mesh_pipeline`, which also holds the state hash
+equal at 1, 2 and 8 workers).
+
 A collider marked **Is Trigger** (the Inspector, or
 `engine.set_trigger(e, true)`; `engine.is_trigger(e)` reads it) reports
 overlaps instead of colliding, as Unity's triggers and Godot's areas do.
@@ -555,8 +571,9 @@ upright, and the entity must be a transform root, scaled uniformly, with no
 rigid body or a kinematic one; `engine.get_character_controller(e)` and
 `engine.remove_character_controller(e)` read and remove it
 (`engine_unit_character_move`, `engine_integration_lua_character_controller`).
-Like the shape sweeps and overlaps, it meets a heightfield as its bounding
-box, so a character cannot yet walk heightfield terrain.
+It walks on a Mesh collider's triangles. Like the shape sweeps and
+overlaps, it meets a heightfield as its bounding box, so a character cannot
+yet walk heightfield terrain.
 
 A Nav Mesh Surface (Add Component > Navigation) marks where agents walk, as
 Unity's NavMeshSurface does. Its box (Half Extents, around the entity's

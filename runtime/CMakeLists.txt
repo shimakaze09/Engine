@@ -19,6 +19,7 @@ engine_add_module_library(engine_runtime
     src/engine_frame_collect.cpp
     src/engine_runtime_streaming.cpp
     src/mesh_reference_resolution.cpp
+    src/collider_mesh_resolution.cpp
     src/scene_environment.cpp
     src/physics_bridge.cpp
     src/collision_layers.cpp

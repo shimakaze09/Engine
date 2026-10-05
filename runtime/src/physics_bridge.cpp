@@ -287,6 +287,36 @@ const physics::HeightfieldData *get_heightfield_data(const World &world,
   return physics::get_heightfield_data(world.physics_context(), entity);
 }
 
+bool set_tri_mesh_data(World &world, Entity entity,
+                       const physics::TriMeshRef &mesh) noexcept {
+  if (!require_phase(world, WorldPhase::Input, "set_tri_mesh_data")) {
+    return false;
+  }
+  if (!world.is_alive(entity)) {
+    return false;
+  }
+  return physics::set_tri_mesh_data(world.physics_context(), entity, mesh);
+}
+
+const physics::TriMeshData *get_tri_mesh_data(const World &world,
+                                              Entity entity) noexcept {
+  if (!world.is_alive(entity)) {
+    return nullptr;
+  }
+  return physics::get_tri_mesh_data(world.physics_context(), entity);
+}
+
+bool collider_world_geometry(
+    const World &world, Entity entity, const Collider &collider,
+    const math::Mat4 &worldMatrix,
+    physics::ColliderWorldGeometry *outGeometry) noexcept {
+  if (!world.is_alive(entity)) {
+    return false;
+  }
+  return physics::make_installed_collider_geometry(
+      world.physics_context(), entity, collider, worldMatrix, outGeometry);
+}
+
 // ------ Physics Queries (P1-M3-D) -------------------------------------------
 
 std::size_t raycast_all(const World &world, const math::Vec3 &origin,

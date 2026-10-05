@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "contact_clip.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/collider.h"
@@ -43,11 +44,26 @@ struct PairContext final {
   float speculativeDt;
 };
 
+/// Resolves one contact point of the pair; the normal runs from A to B.
+void resolve_pair_contact(const PairContext &pair,
+                          const engine::math::Vec3 &normal, float overlap,
+                          const engine::math::Vec3 &contactPoint) noexcept;
+/// Resolves a manifold of the pair; the normal runs from A to B.
+void resolve_pair_manifold(const PairContext &pair,
+                           const engine::math::Vec3 &normal,
+                           const ClippedManifold &manifold) noexcept;
+/// Records the colliding pair and wakes its sleepers; true when a response
+/// is due.
+bool record_pair_and_wake(const PairContext &pair) noexcept;
+
 /// Reports whether the collider's world-space linear transform requires the
 /// affine support-mapped narrow phase instead of an axis-aligned fast path.
 bool has_non_identity_linear_transform(
     const ColliderWorldGeometry &geometry) noexcept;
 
+/// TriMesh vs a convex shape: per-triangle contacts reduced to one face
+/// manifold, plus a single point for a contact off that face.
+void narrow_phase_tri_mesh(const PairContext &pair) noexcept;
 /// Heightfield vs any shape: routes to the affine or grid-based resolver.
 void narrow_phase_heightfield(const PairContext &pair) noexcept;
 /// Generic GJK/EPA path for convex shapes carrying any affine hierarchy TRS;

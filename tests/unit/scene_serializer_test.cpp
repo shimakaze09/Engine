@@ -1498,8 +1498,9 @@ int verify_collider_scene_round_trip() {
     return 207;
   }
 
+  // The first shape value past the last ColliderShape (TriMesh, 5).
   constexpr const char *kInvalidScene =
-      "{\"version\":6,\"entities\":[{\"components\":{\"Collider\":{\"shape\":5}"
+      "{\"version\":6,\"entities\":[{\"components\":{\"Collider\":{\"shape\":6}"
       "}}]}";
   std::unique_ptr<engine::runtime::World> invalid(new (std::nothrow)
                                                       engine::runtime::World());
@@ -2074,6 +2075,77 @@ int check_trigger_flag_round_trip() {
   return 0;
 }
 
+/// A TriMesh collider round-trips the mesh it names, written as "mesh"
+/// only for a TriMesh so every other collider's bytes are unchanged; a
+/// mesh on any other shape, or one that does not parse, refuses the
+/// document; a TriMesh naming nothing loads naming nothing.
+int check_tri_mesh_reference_round_trip() {
+  using namespace engine::runtime;
+
+  std::unique_ptr<World> source(new (std::nothrow) World());
+  std::unique_ptr<World> loaded(new (std::nothrow) World());
+  if ((source == nullptr) || (loaded == nullptr)) {
+    return 480;
+  }
+  const Entity entity = source->create_entity();
+  Collider mesh{};
+  mesh.shape = ColliderShape::TriMesh;
+  mesh.meshRef.guid.high = 0x1234567890ABCDEFULL;
+  mesh.meshRef.guid.low = 0x4FEDCBA098765432ULL;
+  mesh.meshRef.localId = 0x432408A2E33116BCULL;
+  if ((entity == kInvalidEntity) || !source->add_collider(entity, mesh)) {
+    return 481;
+  }
+  std::vector<char> buffer(64U * 1024U);
+  std::size_t size = 0U;
+  if (!save_scene(*source, buffer.data(), buffer.size(), &size)) {
+    return 482;
+  }
+  const std::string meshText(buffer.data(), size);
+  const Entity *entities = nullptr;
+  const Collider *colliders = nullptr;
+  if ((meshText.find("\"mesh\":\"") == std::string::npos) ||
+      !load_scene(*loaded, buffer.data(), size) ||
+      (loaded->collider_count() != 1U) ||
+      !loaded->get_collider_range(0U, 1U, &entities, &colliders) ||
+      (colliders[0].shape != ColliderShape::TriMesh) ||
+      !(colliders[0].meshRef == mesh.meshRef)) {
+    return 483;
+  }
+
+  Collider box{};
+  if (!source->add_collider(entity, box) ||
+      !save_scene(*source, buffer.data(), buffer.size(), &size) ||
+      (std::string(buffer.data(), size).find("\"mesh\"") !=
+       std::string::npos)) {
+    return 484;
+  }
+
+  constexpr const char *kMeshOnBox =
+      "{\"version\":6,\"entities\":[{\"components\":{"
+      "\"Collider\":{\"shape\":0,"
+      "\"mesh\":\"10000000-0000-4000-8000-000000000001\"}}}]}";
+  if (load_scene(*loaded, kMeshOnBox, std::strlen(kMeshOnBox))) {
+    return 485;
+  }
+  constexpr const char *kMalformedMesh =
+      "{\"version\":6,\"entities\":[{\"components\":{"
+      "\"Collider\":{\"shape\":5,\"mesh\":\"not a ref\"}}}]}";
+  if (load_scene(*loaded, kMalformedMesh, std::strlen(kMalformedMesh))) {
+    return 486;
+  }
+  constexpr const char *kUnnamed =
+      "{\"version\":6,\"entities\":[{\"components\":{"
+      "\"Collider\":{\"shape\":5}}}]}";
+  if (!load_scene(*loaded, kUnnamed, std::strlen(kUnnamed)) ||
+      !loaded->get_collider_range(0U, 1U, &entities, &colliders) ||
+      (colliders[0].shape != ColliderShape::TriMesh) ||
+      engine::core::asset_ref_is_valid(colliders[0].meshRef)) {
+    return 487;
+  }
+  return 0;
+}
+
 /// No-op callback for arming a timer ahead of a save.
 void transient_timer_noop(engine::runtime::TimerId, void *) noexcept {}
 
@@ -2492,6 +2564,10 @@ int main() {
     return result;
   }
   result = check_trigger_flag_round_trip();
+  if (result != 0) {
+    return result;
+  }
+  result = check_tri_mesh_reference_round_trip();
   if (result != 0) {
     return result;
   }

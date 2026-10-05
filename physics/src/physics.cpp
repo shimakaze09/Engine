@@ -346,16 +346,12 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
 
   for (std::size_t i = 0U; i < colliderCount; ++i) {
     PhysicsTransform entityTransform{};
-    const ConvexHullData *hull = nullptr;
-    if (colliders[i].shape == ColliderShape::ConvexHull) {
-      hull = find_hull_data(physicsCtx, entities[i]);
-    }
-
     geometryValid[i] =
         world.get_simulation_physics_transform(entities[i], simToken,
                                                &entityTransform) &&
-        make_collider_world_geometry(colliders[i], entityTransform.matrix, hull,
-                                     &geometries[i]);
+        make_installed_collider_geometry(physicsCtx, entities[i], colliders[i],
+                                         entityTransform.matrix,
+                                         &geometries[i]);
     bodyOwners[i] = kInvalidEntity;
     bodyCenters[i] = engine::math::Vec3(0.0F, 0.0F, 0.0F);
     bodyRotations[i] = engine::math::Quat();
@@ -671,6 +667,11 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
                                requiresAffineNarrowPhase,
                                speculativeDt};
 
+        if ((shapeA == ColliderShape::TriMesh) ||
+            (shapeB == ColliderShape::TriMesh)) {
+          narrow_phase_tri_mesh(pair);
+          return;
+        }
         if (aIsHeightfield || bIsHeightfield) {
           narrow_phase_heightfield(pair);
           return;

@@ -6,6 +6,7 @@
 #include "engine/math/component_types.h"
 #include "engine/math/mat4.h"
 #include "engine/math/vec3.h"
+#include "engine/physics/tri_mesh.h"
 
 #include <array>
 #include <cstddef>
@@ -53,6 +54,10 @@ struct HeightfieldData final {
   float maxY = 0.0F;
 };
 
+/// ColliderWorldGeometry::triangle for a geometry that stands for its whole
+/// collider.
+inline constexpr std::uint32_t kWholeShape = 0xFFFFFFFFU;
+
 // Captures a collider's validated affine transform and conservative world
 // bounds.
 struct ColliderWorldGeometry final {
@@ -63,14 +68,24 @@ struct ColliderWorldGeometry final {
   math::ColliderShape shape = math::ColliderShape::AABB;
   math::Vec3 halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
   const ConvexHullData *convexHull = nullptr;
+  /// A TriMesh collider's mesh. Its support mapping is the box around the
+  /// mesh (`localCenter` and `halfExtents` in collider space), which bounds
+  /// it; contact and queries use the triangles.
+  const TriMeshData *triMesh = nullptr;
+  math::Vec3 localCenter = math::Vec3(0.0F, 0.0F, 0.0F);
+  /// For a TriMesh, the one triangle this geometry stands for, a convex
+  /// piece whose support is that triangle's corners and whose bounds are
+  /// its own; kWholeShape for the whole mesh.
+  std::uint32_t triangle = kWholeShape;
 };
 
 // Builds authoritative world-space collider geometry from an entity transform.
-[[nodiscard]] bool
-make_collider_world_geometry(const math::Collider &collider,
-                             const math::Mat4 &entityWorldMatrix,
-                             const ConvexHullData *convexHull,
-                             ColliderWorldGeometry *outGeometry) noexcept;
+// A TriMesh collider without its mesh has no geometry: it builds nothing,
+// so it neither collides nor answers queries until its mesh is installed.
+[[nodiscard]] bool make_collider_world_geometry(
+    const math::Collider &collider, const math::Mat4 &entityWorldMatrix,
+    const ConvexHullData *convexHull, ColliderWorldGeometry *outGeometry,
+    const TriMeshData *triMesh = nullptr) noexcept;
 
 // Returns the farthest world-space point in a direction for validated geometry.
 [[nodiscard]] math::Vec3

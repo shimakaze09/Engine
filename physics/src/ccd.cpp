@@ -15,6 +15,7 @@
 #include "engine/physics/physics_material.h"
 #include "engine/physics/physics_world_view.h"
 #include "physics_internal.h"
+#include "tri_mesh_world.h"
 
 #include <algorithm>
 #include <cmath>
@@ -61,11 +62,8 @@ bool build_geometry(const PhysicsWorldView &world, Entity entity,
   } else {
     return false;
   }
-  const ConvexHullData *hull = nullptr;
-  if (collider.shape == ColliderShape::ConvexHull) {
-    hull = get_hull_data_ptr(world.physics_context(), entity);
-  }
-  return make_collider_world_geometry(collider, worldMatrix, hull, outGeometry);
+  return make_installed_collider_geometry(world.physics_context(), entity,
+                                          collider, worldMatrix, outGeometry);
 }
 
 /// Translates cached geometry in world space without rebuilding local shape
@@ -88,13 +86,6 @@ math::Vec3 support_geometry(const void *data, const math::Vec3 &,
                             const math::Vec3 &direction) noexcept {
   return collider_support_point(
       *static_cast<const ColliderWorldGeometry *>(data), direction);
-}
-
-/// Runs exact convex intersection for one transformed CCD candidate.
-GjkResult geometry_intersection(const ColliderWorldGeometry &a,
-                                const ColliderWorldGeometry &b) noexcept {
-  return gjk_epa(&a, a.center, &support_geometry, &b, b.center,
-                 &support_geometry);
 }
 
 /// Returns a capsule's world-space core-segment endpoints: local (0,
@@ -180,6 +171,58 @@ math::Vec3 contact_point(const ColliderWorldGeometry &a,
   const math::Vec3 onA = collider_support_point(a, math::mul(normal, -1.0F));
   const math::Vec3 onB = collider_support_point(b, normal);
   return math::mul(math::add(onA, onB), 0.5F);
+}
+
+/// The first contact of `moving`, carried along `relativeDisplacement` over
+/// t in [0, bestToi), with one convex target given by its support: where
+/// along the step it touched and the intersection there.
+struct AdvanceHit final {
+  float toi = 1.0F;
+  ColliderWorldGeometry geometry{};
+  GjkResult intersection{};
+};
+
+bool advance_to_contact(const ColliderWorldGeometry &moving,
+                        const math::Vec3 &relativeDisplacement,
+                        const math::Vec3 &motionDirection, float relSpeed,
+                        float dt, const void *target, SupportFn targetSupport,
+                        const math::Vec3 &targetCenter,
+                        const math::AABB &targetAabb, float bestToi,
+                        AdvanceHit *out) noexcept {
+  float tLo = 0.0F;
+  for (int iter = 0; iter < kMaxBilateralIterations; ++iter) {
+    const ColliderWorldGeometry candidate =
+        translated_geometry(moving, math::mul(relativeDisplacement, tLo));
+    const GjkResult intersection =
+        gjk_epa(&candidate, candidate.center, &support_geometry, target,
+                targetCenter, targetSupport);
+    if (intersection.intersecting) {
+      out->toi = tLo;
+      out->geometry = candidate;
+      out->intersection = intersection;
+      return tLo < bestToi;
+    }
+    const float boundsSeparation =
+        aabb_separating_distance(candidate.worldAabb, targetAabb);
+    const math::Vec3 movingFront =
+        collider_support_point(candidate, motionDirection);
+    const math::Vec3 targetBack =
+        targetSupport(target, targetCenter, math::mul(motionDirection, -1.0F));
+    const float projectedSeparation =
+        math::dot(math::sub(targetBack, movingFront), motionDirection);
+    const float separation = std::max(boundsSeparation, projectedSeparation);
+    const float minimumAdvance =
+        std::max(kTolerance / (relSpeed * dt), 1.0e-5F);
+    const float advance =
+        separation > kTolerance
+            ? std::max(separation / (relSpeed * dt), minimumAdvance)
+            : minimumAdvance;
+    tLo += advance;
+    if (tLo >= bestToi) {
+      return false;
+    }
+  }
+  return false;
 }
 
 } // namespace
@@ -372,45 +415,81 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
       continue;
     }
 
-    float tLo = 0.0F;
-    bool foundContact = false;
-    ColliderWorldGeometry contactGeometry{};
-    GjkResult contactIntersection{};
-    const math::Vec3 motionDirection = math::div(relVel, relSpeed);
-
-    for (int iter = 0; iter < kMaxBilateralIterations; ++iter) {
-      const ColliderWorldGeometry candidateGeometry = translated_geometry(
-          movingGeometry, math::mul(relativeDisplacement, tLo));
-      const GjkResult intersection =
-          geometry_intersection(candidateGeometry, otherGeometry);
-      if (intersection.intersecting) {
-        foundContact = true;
-        contactGeometry = candidateGeometry;
-        contactIntersection = intersection;
-        break;
+    if (other.shape == ColliderShape::TriMesh) {
+      // A mesh meets the sweep one triangle at a time: its bounds are no
+      // shape, and a triangle has no thickness, so any travel into one is
+      // travel this body's own half extent gates.
+      std::uint32_t triangles[kMaxTriMeshCandidates] = {};
+      const std::size_t found =
+          std::min(collect_tri_mesh_triangles(
+                       *otherGeometry.triMesh,
+                       world_box_into_mesh(otherGeometry,
+                                           math::AABB{sweepMin, sweepMax}),
+                       triangles, kMaxTriMeshCandidates),
+                   kMaxTriMeshCandidates);
+      const math::Vec3 motionDirection = math::div(relVel, relSpeed);
+      for (std::size_t t = 0U; t < found; ++t) {
+        WorldTriangle triangle{};
+        if (!world_triangle(otherGeometry, triangles[t], &triangle)) {
+          continue;
+        }
+        math::AABB triangleBox{triangle.v[0], triangle.v[0]};
+        for (std::size_t k = 1U; k < 3U; ++k) {
+          triangleBox.min =
+              math::Vec3(std::min(triangleBox.min.x, triangle.v[k].x),
+                         std::min(triangleBox.min.y, triangle.v[k].y),
+                         std::min(triangleBox.min.z, triangle.v[k].z));
+          triangleBox.max =
+              math::Vec3(std::max(triangleBox.max.x, triangle.v[k].x),
+                         std::max(triangleBox.max.y, triangle.v[k].y),
+                         std::max(triangleBox.max.z, triangle.v[k].z));
+        }
+        AdvanceHit hit{};
+        if (!advance_to_contact(movingGeometry, relativeDisplacement,
+                                motionDirection, relSpeed, dt, &triangle,
+                                &support_world_triangle, triangle.center,
+                                triangleBox, bestToi, &hit)) {
+          continue;
+        }
+        // From the triangle toward this body: EPA's normal, else the face
+        // turned toward the body.
+        math::Vec3 normal = math::mul(hit.intersection.normal, -1.0F);
+        if (!(math::length_sq(normal) > 1.0e-12F)) {
+          normal = triangle.normal;
+        }
+        normal = math::normalize(normal);
+        if (math::dot(math::sub(hit.geometry.center, triangle.center), normal) <
+            0.0F) {
+          normal = math::mul(normal, -1.0F);
+        }
+        const float travelIntoContact =
+            -math::dot(relativeDisplacement, normal);
+        if (travelIntoContact <= (minHalf * 0.5F)) {
+          continue;
+        }
+        bestToi = hit.toi;
+        anyHit = true;
+        bestNormal = normal;
+        bestContactPt =
+            collider_support_point(hit.geometry, math::mul(normal, -1.0F));
+        bestHitEntity = entities[i].index;
+        bestOtherVel = otherVel;
+        bestOtherOwner = otherOwner;
+        bestOtherRestitution = other.restitution;
+        bestOtherMinHalf = 0.0F;
       }
-
-      const float boundsSeparation = aabb_separating_distance(
-          candidateGeometry.worldAabb, otherGeometry.worldAabb);
-      const math::Vec3 movingFront =
-          collider_support_point(candidateGeometry, motionDirection);
-      const math::Vec3 targetBack = collider_support_point(
-          otherGeometry, math::mul(motionDirection, -1.0F));
-      const float projectedSeparation =
-          math::dot(math::sub(targetBack, movingFront), motionDirection);
-      const float separation = std::max(boundsSeparation, projectedSeparation);
-      const float minimumAdvance =
-          std::max(kTolerance / (relSpeed * dt), 1.0e-5F);
-      const float advance =
-          separation > kTolerance
-              ? std::max(separation / (relSpeed * dt), minimumAdvance)
-              : minimumAdvance;
-      tLo += advance;
-
-      if (tLo >= bestToi) {
-        break;
-      }
+      continue;
     }
+
+    AdvanceHit hit{};
+    const math::Vec3 motionDirection = math::div(relVel, relSpeed);
+    const bool foundContact = advance_to_contact(
+        movingGeometry, relativeDisplacement, motionDirection, relSpeed, dt,
+        &otherGeometry, &support_geometry, otherGeometry.center,
+        otherGeometry.worldAabb, bestToi, &hit);
+    const float tLo = hit.toi;
+    const ColliderWorldGeometry &contactGeometry = hit.geometry;
+    const GjkResult &contactIntersection = hit.intersection;
 
     if (foundContact && (tLo < bestToi)) {
       const math::Vec3 normal =

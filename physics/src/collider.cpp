@@ -69,6 +69,25 @@ local_support_point(const ColliderWorldGeometry &geometry,
   case math::ColliderShape::AABB:
   case math::ColliderShape::Heightfield:
     return signed_extent(localDirection, geometry.halfExtents);
+  case math::ColliderShape::TriMesh: {
+    const TriMeshData *const mesh = geometry.triMesh;
+    if ((mesh == nullptr) || (geometry.triangle >= mesh->triangle_count())) {
+      return math::add(geometry.localCenter,
+                       signed_extent(localDirection, geometry.halfExtents));
+    }
+    std::size_t best = 0U;
+    float bestProjection =
+        math::dot(mesh->corner(geometry.triangle, 0U), localDirection);
+    for (std::size_t corner = 1U; corner < 3U; ++corner) {
+      const float projection =
+          math::dot(mesh->corner(geometry.triangle, corner), localDirection);
+      if (projection > bestProjection) {
+        bestProjection = projection;
+        best = corner;
+      }
+    }
+    return mesh->corner(geometry.triangle, best);
+  }
   case math::ColliderShape::Sphere: {
     const float lengthSquared = math::dot(localDirection, localDirection);
     if (!(lengthSquared > 0.0F) || !finite(lengthSquared)) {
@@ -119,6 +138,7 @@ local_support_point(const ColliderWorldGeometry &geometry,
   case math::ColliderShape::Capsule:
   case math::ColliderShape::ConvexHull:
   case math::ColliderShape::Heightfield:
+  case math::ColliderShape::TriMesh:
     return true;
   }
   return false;
@@ -126,10 +146,11 @@ local_support_point(const ColliderWorldGeometry &geometry,
 
 } // namespace
 
-bool make_collider_world_geometry(
-    const math::Collider &collider, const math::Mat4 &entityWorldMatrix,
-    const ConvexHullData *const convexHull,
-    ColliderWorldGeometry *const outGeometry) noexcept {
+bool make_collider_world_geometry(const math::Collider &collider,
+                                  const math::Mat4 &entityWorldMatrix,
+                                  const ConvexHullData *const convexHull,
+                                  ColliderWorldGeometry *const outGeometry,
+                                  const TriMeshData *const triMesh) noexcept {
   if (outGeometry == nullptr || !finite(entityWorldMatrix) ||
       !affine(entityWorldMatrix) || !finite(collider.localPosition) ||
       !finite(collider.localRotation) || !finite(collider.halfExtents) ||
@@ -168,6 +189,11 @@ bool make_collider_world_geometry(
     }
   }
 
+  if ((collider.shape == math::ColliderShape::TriMesh) &&
+      ((triMesh == nullptr) || (triMesh->triangle_count() == 0U))) {
+    return false;
+  }
+
   ColliderWorldGeometry geometry{};
   geometry.localToWorld =
       math::mul(entityWorldMatrix,
@@ -188,6 +214,14 @@ bool make_collider_world_geometry(
                                     std::fabs(collider.halfExtents.z));
   geometry.convexHull =
       (shape == math::ColliderShape::ConvexHull) ? convexHull : nullptr;
+  if (shape == math::ColliderShape::TriMesh) {
+    // The mesh's own bounds, never the authored half extents: a mesh is
+    // where its triangles are.
+    const math::AABB &bounds = triMesh->local_bounds();
+    geometry.triMesh = triMesh;
+    geometry.localCenter = math::mul(math::add(bounds.min, bounds.max), 0.5F);
+    geometry.halfExtents = math::mul(math::sub(bounds.max, bounds.min), 0.5F);
+  }
 
   const math::Vec3 positiveX =
       collider_support_point(geometry, math::Vec3(1.0F, 0.0F, 0.0F));

@@ -17,6 +17,7 @@
 #include "engine/math/vec3.h"
 #include "engine/physics/constraint_solver.h"
 #include "engine/physics/physics.h"
+#include "engine/physics/tri_mesh.h"
 
 #ifndef ENGINE_MAX_ENTITIES
 #define ENGINE_MAX_ENTITIES 65536U
@@ -38,6 +39,9 @@ static constexpr std::size_t kCollisionPairHashBuckets = 4096U;
 static constexpr std::size_t kMaxColliders = ENGINE_MAX_ENTITIES;
 static constexpr std::size_t kMaxConvexHulls = 256U;
 static constexpr std::size_t kMaxHeightfields = 16U;
+/// TriMesh colliders a world holds at once. Colliders that use the same
+/// mesh share its triangles, so this bounds colliders, not meshes.
+static constexpr std::size_t kMaxTriMeshColliders = 1024U;
 // Trigger/other collider pairs overlapping at once. A step that finds more
 // keeps the previous step's set and reports nothing (see
 // PhysicsShapeStore::triggerOverlaps), so events arrive late, never wrong.
@@ -134,6 +138,12 @@ struct PhysicsShapeStore final {
   std::array<HeightfieldData, kMaxHeightfields> heightfieldData{};
   std::array<Entity, kMaxHeightfields> heightfieldEntity{};
   std::size_t heightfieldCount = 0U;
+
+  std::array<TriMeshRef, kMaxTriMeshColliders> triMeshData =
+      std::array<TriMeshRef, kMaxTriMeshColliders>();
+  std::array<Entity, kMaxTriMeshColliders> triMeshEntity =
+      std::array<Entity, kMaxTriMeshColliders>();
+  std::size_t triMeshCount = 0U;
 
   // Per-collider snapshot rebuilt by resolve_collisions each step; the next
   // step's CCD reads it for cheap candidate rejection and ownership lookup
@@ -330,6 +340,12 @@ struct PhysicsContext final {
   // Overlapping pairs the last resolve skipped before the narrow phase
   // because neither side can move: no response and no collision event.
   std::uint32_t immovablePairsSkipped = 0U;
+
+  // TriMesh pairs the last resolves skipped because the mesh's body moves
+  // (a mesh is static geometry), and pairs that met more triangles than
+  // one pair considers. Both count up; observable so a test can see them.
+  std::uint32_t triMeshMovingPairsSkipped = 0U;
+  std::uint32_t triMeshCandidateOverflows = 0U;
 
   // Collision-pair buffer diagnostic: pairs recorded past
   // kMaxCollisionPairs are counted per step and reported once per

@@ -769,15 +769,17 @@ bool read_light_component(const core::JsonParser &parser,
   return true;
 }
 
-
 // Hull payloads round-trip via HullSource provenance (rebuilt by
-// World::add_collider on install); Heightfield payloads are NOT serialized —
-// they are reachable only from tests today, and terrain authoring is expected
+// World::add_collider on install); a TriMesh's triangles round-trip as the
+// reference to the mesh asset they come from ("mesh", written only for a
+// TriMesh, so every other collider's bytes are unchanged), which the
+// collider mesh pass builds them from; Heightfield payloads are NOT serialized
+// — they are reachable only from tests today, and terrain authoring is expected
 // to bring its own asset-backed provenance before that changes.
 bool write_collider_component(core::JsonWriter &writer,
                               const Collider &component) noexcept {
   const std::uint32_t shape = static_cast<std::uint32_t>(component.shape);
-  if (shape > static_cast<std::uint32_t>(ColliderShape::Heightfield)) {
+  if (shape > static_cast<std::uint32_t>(ColliderShape::TriMesh)) {
     return false;
   }
   const std::uint32_t hullSource =
@@ -804,6 +806,9 @@ bool write_collider_component(core::JsonWriter &writer,
   if (component.isTrigger) {
     writer.write_bool("isTrigger", true);
   }
+  if (component.shape == ColliderShape::TriMesh) {
+    content::write_asset_ref(writer, kMeshRefField, component.meshRef);
+  }
   writer.end_object();
   return !writer.failed();
 }
@@ -821,7 +826,7 @@ bool read_collider_component(const core::JsonParser &parser,
   std::uint32_t shape = static_cast<std::uint32_t>(component.shape);
   if (parser.get_object_field(colliderObject, "shape", &value)) {
     if (!parser.as_uint(value, &shape) ||
-        (shape > static_cast<std::uint32_t>(ColliderShape::Heightfield))) {
+        (shape > static_cast<std::uint32_t>(ColliderShape::TriMesh))) {
       return false;
     }
     component.shape = static_cast<ColliderShape>(shape);
@@ -872,6 +877,12 @@ bool read_collider_component(const core::JsonParser &parser,
   }
   if (parser.get_object_field(colliderObject, "isTrigger", &value) &&
       !parser.as_bool(value, &component.isTrigger)) {
+    return false;
+  }
+  // Only a TriMesh names a mesh; a mesh on any other shape contradicts it.
+  if (parser.get_object_field(colliderObject, kMeshRefField, &value) &&
+      ((component.shape != ColliderShape::TriMesh) ||
+       !content::read_asset_ref(parser, value, &component.meshRef))) {
     return false;
   }
 

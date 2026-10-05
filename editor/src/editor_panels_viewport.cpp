@@ -218,14 +218,10 @@ void draw_selected_collider_overlay(
     return;
   }
 
-  const physics::ConvexHullData *hull =
-      (collider->shape == runtime::ColliderShape::ConvexHull)
-          ? runtime::get_convex_hull_data(*editor_session().world,
-                                          selectedEntity)
-          : nullptr;
   physics::ColliderWorldGeometry geometry{};
-  if (!physics::make_collider_world_geometry(*collider, worldTransform->matrix,
-                                             hull, &geometry)) {
+  if (!runtime::collider_world_geometry(*editor_session().world, selectedEntity,
+                                        *collider, worldTransform->matrix,
+                                        &geometry)) {
     return;
   }
 
@@ -265,6 +261,7 @@ void draw_selected_collider_overlay(
     break;
   }
   case runtime::ColliderShape::ConvexHull: {
+    const physics::ConvexHullData *hull = geometry.convexHull;
     if ((hull != nullptr) && (hull->vertexCount >= 4U) &&
         (hull->planeCount >= 4U)) {
       emit_collider_hull(localToWorld, *hull);
@@ -284,6 +281,24 @@ void draw_selected_collider_overlay(
     const math::Vec3 aabbHalf = math::mul(
         math::sub(geometry.worldAabb.max, geometry.worldAabb.min), 0.5F);
     emit_collider_box(math::Mat4(), aabbCenter, aabbHalf);
+    break;
+  }
+  case runtime::ColliderShape::TriMesh: {
+    // Every edge while the mesh is small enough to read as a wireframe;
+    // past that, the box around it.
+    constexpr std::size_t kMaxDrawnTriangles = 4096U;
+    const physics::TriMeshData *mesh = geometry.triMesh;
+    if ((mesh != nullptr) && (mesh->triangle_count() <= kMaxDrawnTriangles)) {
+      for (std::size_t t = 0U; t < mesh->triangle_count(); ++t) {
+        for (std::size_t e = 0U; e < 3U; ++e) {
+          emit_collider_segment(localToWorld, mesh->corner(t, e),
+                                mesh->corner(t, (e + 1U) % 3U));
+        }
+      }
+    } else {
+      emit_collider_box(localToWorld, geometry.localCenter,
+                        geometry.halfExtents);
+    }
     break;
   }
   default: {

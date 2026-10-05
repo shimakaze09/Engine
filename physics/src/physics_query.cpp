@@ -14,8 +14,10 @@
 
 #include "engine/physics/physics_context.h"
 #include "engine/physics/physics_world_view.h"
+#include "engine/physics/tri_mesh.h"
 #include "narrow_phase.h"
 #include "physics_internal.h"
+#include "tri_mesh_world.h"
 
 #include <algorithm>
 #include <cmath>
@@ -50,12 +52,9 @@ bool collider_geometry(const PhysicsWorldView &world, Entity entity,
   if (!world.get_physics_transform(entity, &worldTransform)) {
     return false;
   }
-  const ConvexHullData *hull = nullptr;
-  if (collider.shape == ColliderShape::ConvexHull) {
-    hull = get_hull_data_ptr(world.physics_context(), entity);
-  }
-  return make_collider_world_geometry(collider, worldTransform.matrix, hull,
-                                      outGeometry);
+  return make_installed_collider_geometry(world.physics_context(), entity,
+                                          collider, worldTransform.matrix,
+                                          outGeometry);
 }
 
 // Swept sphere vs AABB: expands the box by the radius and raycasts,
@@ -246,33 +245,17 @@ bool ray_intersects_triangle(const math::Ray &ray, const math::Vec3 &a,
                              const math::Vec3 &b, const math::Vec3 &c,
                              float maxDistance, float *outT,
                              math::Vec3 *outNormal) noexcept {
-  const math::Vec3 edgeAB = math::sub(b, a);
-  const math::Vec3 edgeAC = math::sub(c, a);
-  const math::Vec3 crossDirection = math::cross(ray.direction, edgeAC);
-  const float determinant = math::dot(edgeAB, crossDirection);
-  if (std::fabs(determinant) <= 1.0e-10F) {
-    return false;
-  }
-  const float inverseDeterminant = 1.0F / determinant;
-  const math::Vec3 originOffset = math::sub(ray.origin, a);
-  const float u = math::dot(originOffset, crossDirection) * inverseDeterminant;
-  if ((u < 0.0F) || (u > 1.0F)) {
-    return false;
-  }
-  const math::Vec3 crossOffset = math::cross(originOffset, edgeAB);
-  const float v = math::dot(ray.direction, crossOffset) * inverseDeterminant;
-  if ((v < 0.0F) || ((u + v) > 1.0F)) {
-    return false;
-  }
-  const float candidate = math::dot(edgeAC, crossOffset) * inverseDeterminant;
-  if ((candidate < 0.0F) || (candidate > maxDistance)) {
+  float candidate = 0.0F;
+  if (!ray_triangle_intersect(ray.origin, ray.direction, a, b, c, maxDistance,
+                              &candidate)) {
     return false;
   }
   if (outT != nullptr) {
     *outT = candidate;
   }
   if (outNormal != nullptr) {
-    math::Vec3 normal = math::normalize(math::cross(edgeAB, edgeAC));
+    math::Vec3 normal =
+        math::normalize(math::cross(math::sub(b, a), math::sub(c, a)));
     if (normal.y < 0.0F) {
       normal = math::mul(normal, -1.0F);
     }
@@ -363,6 +346,15 @@ bool ray_intersects_geometry(const PhysicsWorldView &world, Entity entity,
     hit = geometry.convexHull != nullptr &&
           ray_intersects_convex_hull(localRay, *geometry.convexHull,
                                      maxDistance, &hitT, &localNormal);
+  } else if (geometry.shape == ColliderShape::TriMesh) {
+    TriMeshRayHit meshHit{};
+    hit = (geometry.triMesh != nullptr) &&
+          raycast_tri_mesh(*geometry.triMesh, localRay.origin,
+                           localRay.direction, maxDistance, &meshHit);
+    if (hit) {
+      hitT = meshHit.t;
+      localNormal = meshHit.normal;
+    }
   } else if (geometry.shape == ColliderShape::Heightfield) {
     const HeightfieldData *heightfield =
         get_heightfield_data(world.physics_context(), entity);
@@ -589,7 +581,15 @@ bool query_geometry(ColliderShape shape, const math::Vec3 &center,
       nullptr, outGeometry);
 }
 
+/// Whether `geometry` is a whole TriMesh rather than one of its triangles.
+bool whole_tri_mesh(const ColliderWorldGeometry &geometry) noexcept {
+  return (geometry.shape == ColliderShape::TriMesh) &&
+         (geometry.triangle == kWholeShape);
+}
+
 /// Tests two convex affine geometries, using AABBs for heightfields only.
+/// A TriMesh overlaps when one of its triangles does; two meshes, having
+/// no volume, never do.
 bool geometries_overlap(const ColliderWorldGeometry &query,
                         const ColliderWorldGeometry &target) noexcept {
   if (!math::aabb_intersects(query.worldAabb, target.worldAabb)) {
@@ -598,6 +598,20 @@ bool geometries_overlap(const ColliderWorldGeometry &query,
   if ((query.shape == ColliderShape::Heightfield) ||
       (target.shape == ColliderShape::Heightfield)) {
     return true;
+  }
+  if (whole_tri_mesh(query) && whole_tri_mesh(target)) {
+    return false;
+  }
+  if (whole_tri_mesh(query) || whole_tri_mesh(target)) {
+    const ColliderWorldGeometry &mesh = whole_tri_mesh(query) ? query : target;
+    const ColliderWorldGeometry &other = whole_tri_mesh(query) ? target : query;
+    bool overlap = false;
+    for_each_shape_piece(mesh, other.worldAabb,
+                         [&](const ColliderWorldGeometry &piece) noexcept {
+                           overlap = convex_geometries_overlap(other, piece);
+                           return !overlap;
+                         });
+    return overlap;
   }
   return convex_geometries_overlap(query, target);
 }
@@ -634,10 +648,10 @@ float aabb_separation_distance(const math::AABB &a,
 /// reported impact times sit within ~2e-5 of the surface; grazing
 /// contacts that stall the bounds for 128 tolerance steps are dropped as
 /// misses (a documented approximation of this scheme).
-bool sweep_geometry_conservative(const ColliderWorldGeometry &query,
-                                 const math::Vec3 &direction, float maxT,
-                                 const ColliderWorldGeometry &target,
-                                 float *outT) noexcept {
+bool sweep_piece_conservative(const ColliderWorldGeometry &query,
+                              const math::Vec3 &direction, float maxT,
+                              const ColliderWorldGeometry &target,
+                              float *outT) noexcept {
   constexpr int kMaxSweepIterations = 128;
   constexpr float kSweepTolerance = 1.0e-5F;
   float t = 0.0F;
@@ -663,6 +677,50 @@ bool sweep_geometry_conservative(const ColliderWorldGeometry &query,
   return false;
 }
 
+/// sweep_piece_conservative against every convex piece of `target` (each
+/// triangle of a TriMesh near the sweep): the earliest hit, and the piece
+/// it met in `outPiece` when given.
+bool sweep_geometry_conservative(
+    const ColliderWorldGeometry &query, const math::Vec3 &direction, float maxT,
+    const ColliderWorldGeometry &target, float *outT,
+    ColliderWorldGeometry *outPiece = nullptr) noexcept {
+  if (!whole_tri_mesh(target)) {
+    if (outPiece != nullptr) {
+      *outPiece = target;
+    }
+    return sweep_piece_conservative(query, direction, maxT, target, outT);
+  }
+  const ColliderWorldGeometry end =
+      translated_query_geometry(query, math::mul(direction, maxT));
+  const math::AABB swept{
+      math::Vec3(std::min(query.worldAabb.min.x, end.worldAabb.min.x),
+                 std::min(query.worldAabb.min.y, end.worldAabb.min.y),
+                 std::min(query.worldAabb.min.z, end.worldAabb.min.z)),
+      math::Vec3(std::max(query.worldAabb.max.x, end.worldAabb.max.x),
+                 std::max(query.worldAabb.max.y, end.worldAabb.max.y),
+                 std::max(query.worldAabb.max.z, end.worldAabb.max.z))};
+  bool found = false;
+  float best = maxT;
+  for_each_shape_piece(
+      target, swept, [&](const ColliderWorldGeometry &piece) noexcept {
+        float t = 0.0F;
+        // Ties keep the lower triangle, visited first.
+        if (sweep_piece_conservative(query, direction, best, piece, &t) &&
+            (!found || (t < best))) {
+          found = true;
+          best = t;
+          if (outPiece != nullptr) {
+            *outPiece = piece;
+          }
+        }
+        return true;
+      });
+  if (found) {
+    *outT = best;
+  }
+  return found;
+}
+
 /// Approximate contact normal for shape-accurate sweep hits: from the
 /// target center toward the query center at impact, falling back to the
 /// reversed sweep direction for coincident centers.
@@ -675,6 +733,19 @@ math::Vec3 sweep_contact_normal(const math::Vec3 &queryCenterAtHit,
     return math::mul(delta, 1.0F / std::sqrt(lengthSquared));
   }
   return math::mul(direction, -1.0F);
+}
+
+/// The unit face normal of a TriMesh triangle piece, turned against
+/// `direction`.
+math::Vec3 triangle_face_normal(const ColliderWorldGeometry &piece,
+                                const math::Vec3 &direction) noexcept {
+  WorldTriangle triangle{};
+  if (!world_triangle(piece, piece.triangle, &triangle)) {
+    return math::mul(direction, -1.0F);
+  }
+  return (math::dot(triangle.normal, direction) > 0.0F)
+             ? math::mul(triangle.normal, -1.0F)
+             : triangle.normal;
 }
 
 /// Normalizes a finite query direction and validates its world-space range.
@@ -1038,9 +1109,10 @@ bool sweep_query_shape(const PhysicsWorldView &world,
     const bool exactBoxTarget = exactBoxTargets &&
                                 (geometry.shape == ColliderShape::AABB) &&
                                 !has_non_identity_linear_transform(geometry);
+    ColliderWorldGeometry hitPiece = geometry;
     if (!exactBoxTarget &&
         !sweep_geometry_conservative(queryGeometry, normalizedDirection, bestT,
-                                     geometry, &hitT)) {
+                                     geometry, &hitT, &hitPiece)) {
       continue;
     }
 
@@ -1060,6 +1132,9 @@ bool sweep_query_shape(const PhysicsWorldView &world,
               math::mul(math::sub(targetBox.max, targetBox.min), 0.5F);
           outHit->normal =
               aabb_hit_normal(outHit->contactPoint, boxCenter, boxHalfExtents);
+        } else if (hitPiece.triangle != kWholeShape) {
+          // A triangle's face, turned against the sweep.
+          outHit->normal = triangle_face_normal(hitPiece, normalizedDirection);
         } else {
           outHit->normal = sweep_contact_normal(outHit->contactPoint, geometry,
                                                 normalizedDirection);

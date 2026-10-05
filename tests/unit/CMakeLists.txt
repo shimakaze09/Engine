@@ -1904,6 +1904,32 @@ engine_add_test_executable(engine_unit_contact_relaxation
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_tri_mesh
+    SOURCES
+    tri_mesh_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+)
+
+engine_add_test_executable(engine_unit_tri_mesh_collision
+    SOURCES
+    tri_mesh_collision_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_collider_mesh_resolution
+    SOURCES
+    collider_mesh_resolution_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_content
+    engine_physics
+)
+
 engine_add_test_executable(engine_unit_physics_query
     SOURCES
     physics_query_test.cpp

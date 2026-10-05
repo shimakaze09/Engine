@@ -16,11 +16,13 @@
 #include "editor_multi_edit.h"
 #include "editor_panels_inspector_custom.h"
 #include "editor_panels_inspector_generic.h"
+#include "editor_reference_pickers.h"
 #include "editor_session.h"
 #include "engine/core/logging.h"
 #include "engine/renderer/command_buffer.h"
 
 #include "engine/runtime/camera_component_update.h"
+#include "engine/runtime/editor_bridge.h"
 
 #include <cstdint>
 
@@ -153,17 +155,17 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
   draw_component_section(
       entity, ComponentEditType::Collider, "Collider",
       &ComponentEditSnapshot::collider, authoredEditable, liveEditable, true,
-      [](runtime::Collider &c) {
-        // The combo's selectable options come from metadata (the Enum
-        // widget kind); the display-only names cover the two shapes a
-        // primitive spawn or import can produce but this combo cannot
-        // select into (a convex hull needs provenance only primitive
-        // spawns carry, and heightfields are not editor-authorable at all
-        // -- see the field's tooltip in editor_inspector_metadata), so an
-        // inspected cylinder/pyramid/imported collider still shows its
-        // real shape name instead of clamping to the first entry.
-        constexpr const char *kDisplayOnlyNames[] = {"Convex Hull",
-                                                      "Heightfield"};
+      [entity](runtime::Collider &c) {
+        // The combo's analytic options come from metadata (the Enum widget
+        // kind), where each label's index is its shape; Mesh, a TriMesh of
+        // a mesh asset's triangles, follows them. The display-only names
+        // cover the two shapes a primitive spawn or import can produce but
+        // this combo cannot select into (a convex hull needs provenance
+        // only primitive spawns carry, and heightfields are not
+        // editor-authorable at all -- see the field's tooltip in
+        // editor_inspector_metadata), so an inspected cylinder/pyramid/
+        // imported collider still shows its real shape name instead of
+        // clamping to the first entry.
         constexpr const char *kFallbackSelectable[] = {"Box", "Sphere",
                                                         "Capsule"};
         const FieldMetadata *meta =
@@ -173,24 +175,51 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
         const int selectableCount =
             (meta != nullptr) ? static_cast<int>(meta->enumLabelCount) : 3;
 
-        int shapeIndex = static_cast<int>(c.shape);
-        if ((shapeIndex < 0) || (shapeIndex >= 5)) {
-          shapeIndex = 0;
+        const int shapeIndex = static_cast<int>(c.shape);
+        const char *currentLabel = selectable[0];
+        if (c.shape == runtime::ColliderShape::TriMesh) {
+          currentLabel = "Mesh";
+        } else if (c.shape == runtime::ColliderShape::ConvexHull) {
+          currentLabel = "Convex Hull";
+        } else if (c.shape == runtime::ColliderShape::Heightfield) {
+          currentLabel = "Heightfield";
+        } else if ((shapeIndex >= 0) && (shapeIndex < selectableCount)) {
+          currentLabel = selectable[shapeIndex];
         }
-        const char *currentLabel =
-            (shapeIndex < selectableCount)
-                ? selectable[shapeIndex]
-                : kDisplayOnlyNames[shapeIndex - selectableCount];
         bool modified = false;
         if (ImGui::BeginCombo("Shape", currentLabel)) {
           for (int i = 0; i < selectableCount; ++i) {
             if (ImGui::Selectable(selectable[i], shapeIndex == i) &&
                 (shapeIndex != i)) {
               c.shape = static_cast<runtime::ColliderShape>(i);
+              // Only a TriMesh names a mesh.
+              c.meshRef = core::AssetRef{};
               modified = true;
             }
           }
+          const bool isMesh = (c.shape == runtime::ColliderShape::TriMesh);
+          if (ImGui::Selectable("Mesh", isMesh) && !isMesh) {
+            c.shape = runtime::ColliderShape::TriMesh;
+            // The mesh the entity draws, as Unity's MeshCollider takes its
+            // MeshFilter's: the usual collider for an imported level piece.
+            const runtime::MeshComponent *drawn =
+                (editor_session().world != nullptr)
+                    ? editor_session().world->get_mesh_component_ptr(entity)
+                    : nullptr;
+            c.meshRef = (drawn != nullptr) ? drawn->meshRef : core::AssetRef{};
+            modified = true;
+          }
           ImGui::EndCombo();
+        }
+        if (c.shape == runtime::ColliderShape::TriMesh) {
+          // The id is this session's answer for the reference; the picker
+          // writes both, and the collider keeps the reference.
+          std::uint64_t meshId = runtime::editor_asset_id(c.meshRef);
+          if (draw_asset_reference_picker("Mesh", content::AssetTypeTag::Mesh,
+                                          &meshId, &c.meshRef)) {
+            modified = true;
+          }
+          ImGui::TextDisabled("Static geometry: a body that moves ignores it");
         }
         return draw_reflected_component_fields("engine::runtime::Collider",
                                                &c, g_showAdvanced) ||
