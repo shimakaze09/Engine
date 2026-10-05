@@ -8,11 +8,19 @@
 // native handle selects bgfx's Noop renderer, so the windowed bootstrap
 // and the editor bridge come up with no display attached. Base segfaults
 // inside ImGui_ImplBgfx_RenderDrawData on the first frame.
+//
+// Regression for #1218: the failure is not only logged. The renderer
+// reports why it draws no scene, naming the cooked shader folder it read
+// and the target that cooks it, for the editor's views to show in place of
+// a black image; the report is clear before the backend tries and after
+// shutdown.
 
 #include "../asset_root.h"
 #include "engine/engine.h"
+#include "engine/renderer/command_buffer.h"
 
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 
 namespace {
@@ -44,8 +52,31 @@ int main() {
     return 3;
   }
 
+  if (engine::renderer::scene_rendering_failure() != nullptr) {
+    std::fprintf(stderr, "FAIL: a failure is reported before the backend "
+                         "has tried to build\n");
+    return 5;
+  }
   const engine::RunResult result = engine::run(3U);
+  const char *failure = engine::renderer::scene_rendering_failure();
+  const bool namesCause =
+      (failure != nullptr) &&
+      (std::strstr(failure, "default shader program") != nullptr) &&
+      (std::strstr(failure, "no_cooked_shaders_here/bgfx/cooked") != nullptr) &&
+      (std::strstr(failure, "bgfx_shader_cook") != nullptr);
+  std::printf("scene rendering failure: %s\n",
+              (failure != nullptr) ? failure : "(none)");
   engine::shutdown();
+  if (!namesCause) {
+    std::fprintf(stderr,
+                 "FAIL: the renderer does not report why it draws no scene, "
+                 "naming the cooked folder and the target that cooks it\n");
+    return 6;
+  }
+  if (engine::renderer::scene_rendering_failure() != nullptr) {
+    std::fprintf(stderr, "FAIL: shutdown leaves the failure reported\n");
+    return 7;
+  }
 
   if (result != engine::RunResult::Stopped) {
     std::fprintf(stderr,

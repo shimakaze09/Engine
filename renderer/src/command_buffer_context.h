@@ -258,6 +258,9 @@ struct BackendState final {
   }
   bool initialized = false;
   bool failed = false;
+  /// Why the backend failed, for scene_rendering_failure(); empty while
+  /// `failed` is false.
+  std::array<char, 640> failureReason{};
 
   // Snapshot of shader_reload_epoch() the cached program ids and uniform
   // locations below were resolved against; a mismatch at flush time
@@ -829,8 +832,9 @@ BackendState &backend_state() noexcept;
 /// Resets public renderer state that can otherwise leak between runs.
 void reset_renderer_public_state() noexcept;
 
-/// Marks backend initialization as failed while clearing partial state.
-void reset_backend_on_failure() noexcept;
+/// Marks backend initialization as failed while clearing partial state,
+/// keeping `reason` as what scene_rendering_failure() reports.
+void reset_backend_on_failure(const char *reason) noexcept;
 
 /// Lazily creates every backend GPU resource (shaders and their uniform
 /// locations, sky geometry, SSAO sampling data). Returns immediately once

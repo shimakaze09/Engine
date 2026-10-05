@@ -436,11 +436,31 @@ bool try_reload_entry(ShaderEntry &entry) noexcept {
     // moves the mtimes again and earns exactly one new attempt.
     entry.vertMtime = core::vfs_file_mtime(entry.watchVertPath);
     entry.fragMtime = core::vfs_file_mtime(entry.watchFragPath);
-    char message[640] = {};
-    std::snprintf(message, sizeof(message),
-                  "%s %s: cooked shader binaries unavailable — keeping old "
-                  "program until the cooked files change again",
-                  entry.vertPath, entry.fragPath);
+    char message[1280] = {};
+    if (entry.deviceProgram == kInvalidDeviceProgram) {
+      // A first load has no old program to keep: say what was missing.
+      const RenderDevice *dev = render_device();
+      const char *profile =
+          ((dev != nullptr) && (dev->cooked_program_profile != nullptr))
+              ? dev->cooked_program_profile()
+              : "unknown";
+      char expected[kMaxPathLength * 2U] = {};
+      if (!build_cooked_shader_path(entry.vertPath, entry.defines,
+                                    entry.defineCount, profile, expected,
+                                    sizeof(expected))) {
+        expected[0] = '\0';
+      }
+      std::snprintf(message, sizeof(message),
+                    "%s %s: cooked shader binaries for the '%s' profile are "
+                    "missing or unreadable (looked for %s); the shader cook, "
+                    "bgfx_shader_cook, writes them",
+                    entry.vertPath, entry.fragPath, profile, expected);
+    } else {
+      std::snprintf(message, sizeof(message),
+                    "%s %s: cooked shader binaries unavailable — keeping old "
+                    "program until the cooked files change again",
+                    entry.vertPath, entry.fragPath);
+    }
     // The record names the vertex stage; the text names both.
     core::Diagnostic record = core::make_diagnostic(
         core::LogLevel::Error, core::LogChannel::Shader, message);

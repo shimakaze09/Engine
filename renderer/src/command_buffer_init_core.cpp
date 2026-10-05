@@ -16,9 +16,11 @@
 #include <cstring>
 #include <vector>
 
+#include "command_buffer_init_internal.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/vfs.h"
 #include "engine/math/mat4.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
@@ -31,7 +33,6 @@
 #include "engine/renderer/shader_system.h"
 #include "engine/renderer/shadow_map.h"
 #include "engine/renderer/texture_loader.h"
-#include "command_buffer_init_internal.h"
 
 namespace engine::renderer {
 
@@ -344,12 +345,38 @@ void refresh_shading_programs(BackendState &backend) noexcept {
   }
 }
 
+/// Why scene rendering is unavailable when the engine's `what` shader
+/// program did not load, written into `out`. Nearly always a missing or
+/// incomplete cook, so it names the folder the cooked binaries were read
+/// from and the targets that write it. Called while the device is still
+/// open, for its cooked-program profile.
+void describe_shader_failure(const char *what, char *out,
+                             std::size_t capacity) noexcept {
+  const RenderDevice *dev = render_device();
+  const char *profile =
+      ((dev != nullptr) && (dev->cooked_program_profile != nullptr))
+          ? dev->cooked_program_profile()
+          : "unknown";
+  const char *root = renderer_context().shaderRootPath;
+  char osRoot[512] = {};
+  if (!core::vfs_resolve_os_path(root, osRoot, sizeof(osRoot))) {
+    static_cast<void>(std::snprintf(osRoot, sizeof(osRoot), "%s", root));
+  }
+  static_cast<void>(std::snprintf(
+      out, capacity,
+      "the engine's %s shader program did not load: its cooked binaries "
+      "for the '%s' profile are missing or unreadable under "
+      "%s/bgfx/cooked. Building engine_editor_app, engine_player or "
+      "bgfx_shader_cook cooks them",
+      what, profile, osRoot));
+}
+
 bool init_backend_core(BackendState &backend) noexcept {
   const bool backendOpenedDevice = (render_device() == nullptr);
   if (!initialize_render_device()) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to initialize render device");
-    reset_backend_on_failure();
+    reset_backend_on_failure("the render device did not initialize");
     return false;
   }
 
@@ -357,7 +384,7 @@ bool init_backend_core(BackendState &backend) noexcept {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to initialize shader system");
     release_device_if_opened(backendOpenedDevice);
-    reset_backend_on_failure();
+    reset_backend_on_failure("the shader system did not initialize");
     return false;
   }
 
@@ -369,9 +396,11 @@ bool init_backend_core(BackendState &backend) noexcept {
   if (defaultShaderHandle == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load default shader program");
+    char reason[640] = {};
+    describe_shader_failure("default", reason, sizeof(reason));
     shutdown_shader_system();
     release_device_if_opened(backendOpenedDevice);
-    reset_backend_on_failure();
+    reset_backend_on_failure(reason);
     return false;
   }
 
@@ -380,7 +409,8 @@ bool init_backend_core(BackendState &backend) noexcept {
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
     release_device_if_opened(backendOpenedDevice);
-    reset_backend_on_failure();
+    reset_backend_on_failure("the default shader program lacks uniforms the "
+                             "renderer needs; recook the engine's shaders");
     return false;
   }
 
@@ -403,10 +433,12 @@ bool init_backend_core(BackendState &backend) noexcept {
   if (pbrShaderHandle == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load PBR shader program");
+    char reason[640] = {};
+    describe_shader_failure("PBR", reason, sizeof(reason));
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
     release_device_if_opened(backendOpenedDevice);
-    reset_backend_on_failure();
+    reset_backend_on_failure(reason);
     return false;
   }
 
@@ -418,7 +450,8 @@ bool init_backend_core(BackendState &backend) noexcept {
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
     release_device_if_opened(backendOpenedDevice);
-    reset_backend_on_failure();
+    reset_backend_on_failure("the PBR shader program lacks uniforms the "
+                             "renderer needs; recook the engine's shaders");
     return false;
   }
 
@@ -556,11 +589,13 @@ bool init_backend_core(BackendState &backend) noexcept {
   if (tonemapShaderHandle == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load tonemap shader program");
+    char reason[640] = {};
+    describe_shader_failure("tonemap", reason, sizeof(reason));
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
     release_device_if_opened(backendOpenedDevice);
-    reset_backend_on_failure();
+    reset_backend_on_failure(reason);
     return false;
   }
 
@@ -573,7 +608,8 @@ bool init_backend_core(BackendState &backend) noexcept {
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
     release_device_if_opened(backendOpenedDevice);
-    reset_backend_on_failure();
+    reset_backend_on_failure("the tonemap shader program lacks uniforms the "
+                             "renderer needs; recook the engine's shaders");
     return false;
   }
 
@@ -594,7 +630,8 @@ bool init_backend_core(BackendState &backend) noexcept {
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
     release_device_if_opened(backendOpenedDevice);
-    reset_backend_on_failure();
+    reset_backend_on_failure(
+        "the render device could not create the fullscreen-pass geometry");
     return false;
   }
 

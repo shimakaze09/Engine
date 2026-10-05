@@ -265,6 +265,10 @@ include(FetchContent)
         GIT_TAG 12428216cfa33eb34dc91187ad3a3c92196c9849 # v1.153.9398-566
     )
     engine_make_third_party_available(bgfx)
+    # The engine's local bgfx fixes, applied before bgfx compiles
+    # (decision 0022).
+    include(${CMAKE_SOURCE_DIR}/cmake/patch_bgfx.cmake)
+    engine_patch_bgfx("${bgfx_SOURCE_DIR}")
     if(NOT TARGET bgfx)
         message(FATAL_ERROR "bgfx backend requested but the bgfx target was "
                             "not created by the fetched superproject.")

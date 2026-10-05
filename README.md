@@ -761,7 +761,7 @@ for any change to math, ECS, physics, renderer, or scripting behavior.
 - App starts but assets are missing:
 	- Build from repository root; the build output holds the copied `engine_assets/` and `samples/island/` beside the editor.
 - Shader or render issues:
-	- Verify the shaderc cook ran (`ENGINE_BGFX_SHADERC=ON`) and the cooked binaries exist under `build/engine_assets/shaders/bgfx/cooked/`.
+	- Verify the shaderc cook ran (`ENGINE_BGFX_SHADERC=ON`) and the cooked binaries exist under `build/engine_assets/shaders/bgfx/cooked/`. When the renderer cannot build itself, the Scene and Game views say why in place of the image, naming the cooked folder it read (`engine_integration_renderer_backend_failure`).
 
 ## License
 

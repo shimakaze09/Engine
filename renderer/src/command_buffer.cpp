@@ -614,6 +614,11 @@ void shutdown_renderer() noexcept {
   reset_renderer_public_state();
 }
 
+const char *scene_rendering_failure() noexcept {
+  const BackendState &backend = backend_state();
+  return backend.failed ? backend.failureReason.data() : nullptr;
+}
+
 /// Sets the requested value for active camera.
 void set_active_camera(const CameraState &camera) noexcept {
   renderer_context().activeCamera = camera;
