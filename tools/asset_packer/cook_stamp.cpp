@@ -8,7 +8,6 @@
 #include "engine/content/asset_metadata.h"
 #include "engine/content/asset_sidecar.h"
 #include "engine/content/cook_contract.h"
-#include "engine/content/import_settings_resolve.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -242,26 +241,6 @@ void sort_dependency_digests(std::vector<DependencyDigest> &digests) {
             [](const DependencyDigest &a, const DependencyDigest &b) {
               return a.path < b.path;
             });
-}
-
-/// Reads the import settings that apply to the source: its sidecar's own
-/// block, else an enclosing folder's (import_settings_resolve.h).
-engine::content::SidecarReadResult
-read_authored_import_settings(const char *sourcePath,
-                              ImportSettings *outSettings,
-                              std::string *unreadable) {
-  if ((sourcePath == nullptr) || (outSettings == nullptr)) {
-    return engine::content::SidecarReadResult::Absent;
-  }
-  engine::content::ResolvedImportSettings resolved{};
-  if (!engine::content::resolve_import_settings(sourcePath, &resolved)) {
-    if (unreadable != nullptr) {
-      *unreadable = resolved.unreadable;
-    }
-    return engine::content::SidecarReadResult::Malformed;
-  }
-  *outSettings = resolved.mesh;
-  return engine::content::SidecarReadResult::Ok;
 }
 
 bool make_cookstamp_path(const char *outputPath, char *outPath,
