@@ -250,6 +250,243 @@ inline bool look_rotation(const Vec3 &forward, const Vec3 &up,
   return true;
 }
 
+/// The inverse rotation of any non-zero quaternion: its conjugate over its
+/// squared length. For a unit quaternion this is the conjugate; a zero
+/// quaternion gives identity.
+inline Quat inverse(const Quat &value) noexcept {
+  const float lengthSq = dot(value, value);
+  if (!(lengthSq > 0.0F)) {
+    return Quat();
+  }
+  const float inv = 1.0F / lengthSq;
+  return Quat(-value.x * inv, -value.y * inv, -value.z * inv, value.w * inv);
+}
+
+/// Rotates `v` by the inverse of the unit quaternion `q`: a world-space
+/// vector into the frame `q` orients.
+constexpr Vec3 rotate_inverse(const Vec3 &v, const Quat &q) noexcept {
+  return rotate_vector(v, Quat(-q.x, -q.y, -q.z, q.w));
+}
+
+/// The rotation from unit `from` to unit `to` expressed in `from`'s frame,
+/// from^-1 * to: what `to` is relative to `from`.
+inline Quat relative(const Quat &from, const Quat &to) noexcept {
+  return mul(conjugate(from), to);
+}
+
+/// Normalized lerp along the shortest arc: cheaper than slerp, with the
+/// same endpoints and path but not constant angular speed. Not clamped.
+inline Quat nlerp(const Quat &from, Quat to, float t) noexcept {
+  if (dot(from, to) < 0.0F) {
+    to = Quat(-to.x, -to.y, -to.z, -to.w);
+  }
+  return normalize(Quat(from.x + ((to.x - from.x) * t),
+                        from.y + ((to.y - from.y) * t),
+                        from.z + ((to.z - from.z) * t),
+                        from.w + ((to.w - from.w) * t)));
+}
+
+/// The direction an entity rotated by unit `q` faces: its -Z (the camera
+/// convention look_rotation uses).
+constexpr Vec3 forward(const Quat &q) noexcept {
+  return rotate_vector(Vec3(0.0F, 0.0F, -1.0F), q);
+}
+
+/// The entity's +X.
+constexpr Vec3 right(const Quat &q) noexcept {
+  return rotate_vector(Vec3(1.0F, 0.0F, 0.0F), q);
+}
+
+/// The entity's +Y.
+constexpr Vec3 up(const Quat &q) noexcept {
+  return rotate_vector(Vec3(0.0F, 1.0F, 0.0F), q);
+}
+
+/// The entity's +Z, the opposite of forward.
+constexpr Vec3 back(const Quat &q) noexcept {
+  return rotate_vector(Vec3(0.0F, 0.0F, 1.0F), q);
+}
+
+/// The angle between two unit rotations, in [0, pi] radians.
+inline float angle(const Quat &a, const Quat &b) noexcept {
+  const float d = std::fabs(dot(a, b));
+  return 2.0F * det_acos((d < 1.0F) ? d : 1.0F);
+}
+
+/// The shortest rotation turning direction `from` onto direction `to`;
+/// neither needs to be unit length. Identity when either is zero. Opposite
+/// directions turn half a turn about an axis perpendicular to `from`.
+inline Quat from_to(const Vec3 &from, const Vec3 &to) noexcept {
+  const float fromLength = length(from);
+  const float toLength = length(to);
+  if (!(fromLength > 0.0F) || !(toLength > 0.0F)) {
+    return Quat();
+  }
+  const Vec3 f = mul(from, 1.0F / fromLength);
+  const Vec3 t = mul(to, 1.0F / toLength);
+  const float d = dot(f, t);
+  if (d <= -0.999999F) {
+    // Any axis perpendicular to f: cross with the basis vector least
+    // aligned with it.
+    const Vec3 basis = (std::fabs(f.x) < 0.57735F) ? Vec3(1.0F, 0.0F, 0.0F)
+                                                   : Vec3(0.0F, 1.0F, 0.0F);
+    const Vec3 axis = normalize(cross(f, basis));
+    return Quat(axis.x, axis.y, axis.z, 0.0F);
+  }
+  const Vec3 c = cross(f, t);
+  return normalize(Quat(c.x, c.y, c.z, 1.0F + d));
+}
+
+/// Turns unit `from` towards unit `to` by at most `maxRadians`, landing on
+/// `to` when it is within reach (Unity's RotateTowards).
+inline Quat rotate_towards(const Quat &from, const Quat &to,
+                           float maxRadians) noexcept {
+  const float total = angle(from, to);
+  if ((total == 0.0F) || (total <= maxRadians)) {
+    return to;
+  }
+  return slerp(from, to, maxRadians / total);
+}
+
+/// Unit `q` after turning at angular velocity `omega` (radians per second,
+/// world axes) for `dt` seconds, renormalized; unchanged when the speed is
+/// below 1e-6 rad/s. The physics step's integration, moved here verbatim so
+/// its operations, and the simulation's bits, are unchanged.
+inline Quat integrate(const Quat &q, const Vec3 &omega, float dt) noexcept {
+  const float speedSq = length_sq(omega);
+  if (!(speedSq > 1e-12F)) {
+    return q;
+  }
+  const float speed = std::sqrt(speedSq);
+  const Quat delta = from_axis_angle(div(omega, speed), speed * dt);
+  return normalize(mul(delta, q));
+}
+
+/// The rotation vector (axis times angle, radians) of `q` along its
+/// shorter arc, so its length is at most pi; zero for identity.
+inline Vec3 to_rotation_vector(Quat q) noexcept {
+  if (q.w < 0.0F) {
+    q = Quat(-q.x, -q.y, -q.z, -q.w);
+  }
+  Vec3 axis{};
+  float radians = 0.0F;
+  if (!to_axis_angle(q, &axis, &radians)) {
+    return Vec3(0.0F, 0.0F, 0.0F);
+  }
+  return mul(axis, radians);
+}
+
+/// The rotation a rotation vector (axis times angle) describes; identity
+/// below 1e-6 radians.
+inline Quat from_rotation_vector(const Vec3 &rotation) noexcept {
+  const float radiansSq = length_sq(rotation);
+  if (radiansSq <= 1.0e-6F * 1.0e-6F) {
+    return Quat();
+  }
+  const float radians = std::sqrt(radiansSq);
+  return from_axis_angle(div(rotation, radians), radians);
+}
+
+/// Splits unit `q` into a twist about unit `axis` and the swing that
+/// follows it, q = swing * twist, as Jolt's GetSwingTwist does. When q
+/// turns the axis by exactly half a turn the twist is undefined and is
+/// reported as identity, so swing carries all of q.
+inline void swing_twist(const Quat &q, const Vec3 &axis, Quat *outSwing,
+                        Quat *outTwist) noexcept {
+  const float along = (q.x * axis.x) + (q.y * axis.y) + (q.z * axis.z);
+  Quat twist(axis.x * along, axis.y * along, axis.z * along, q.w);
+  const float twistSq = dot(twist, twist);
+  twist = (twistSq > 1.0e-12F) ? normalize(twist) : Quat();
+  if (outTwist != nullptr) {
+    *outTwist = twist;
+  }
+  if (outSwing != nullptr) {
+    *outSwing = mul(q, conjugate(twist));
+  }
+}
+
+/// The order Euler angles compose in, named by the axes left to right in
+/// the product: YXZ is q = qy(yaw) * qx(pitch) * qz(roll), the engine's
+/// default and the editor's. Pitch is always about +X, yaw about +Y and
+/// roll about +Z; the order decides only how they compose, which is what
+/// differs between tools (Maya and Blender default to XYZ).
+enum class EulerOrder : unsigned char { XYZ, XZY, YXZ, YZX, ZXY, ZYX };
+
+namespace detail {
+
+/// The axes of `order`, left to right in the product, as 0 = X, 1 = Y,
+/// 2 = Z.
+constexpr void euler_axes(EulerOrder order, int *a, int *b, int *c) noexcept {
+  constexpr int kAxes[6][3] = {{0, 1, 2}, {0, 2, 1}, {1, 0, 2},
+                               {1, 2, 0}, {2, 0, 1}, {2, 1, 0}};
+  const int index = static_cast<int>(order);
+  *a = kAxes[index][0];
+  *b = kAxes[index][1];
+  *c = kAxes[index][2];
+}
+
+/// Rotation of `radians` about basis axis `axis` (0 = X, 1 = Y, 2 = Z).
+inline Quat axis_rotation(int axis, float radians) noexcept {
+  const float s = det_sin(radians * 0.5F);
+  const float c = det_cos(radians * 0.5F);
+  if (axis == 0) {
+    return Quat(s, 0.0F, 0.0F, c);
+  }
+  if (axis == 1) {
+    return Quat(0.0F, s, 0.0F, c);
+  }
+  return Quat(0.0F, 0.0F, s, c);
+}
+
+/// The factors of the off-diagonal rotation matrix element (row, col) of
+/// `q`: 2 * ((lo * hi) + (w * third)) when `plus`, else with a minus.
+struct RotationTerms final {
+  float lo;
+  float hi;
+  float third;
+  bool plus;
+};
+
+inline RotationTerms rotation_terms(const Quat &q, int row,
+                                    int col) noexcept {
+  const int first = (row < col) ? row : col;
+  const int second = (row < col) ? col : row;
+  const int other = 3 - row - col;
+  RotationTerms terms{};
+  terms.lo = (first == 0) ? q.x : q.y;
+  terms.hi = (second == 2) ? q.z : q.y;
+  terms.third = (other == 0) ? q.x : ((other == 1) ? q.y : q.z);
+  // The w term is added in the cyclic positions (1, 0), (2, 1) and (0, 2).
+  terms.plus = ((col + 1) % 3) == row;
+  return terms;
+}
+
+/// Element (row, col) of the rotation matrix of `q`, written as the
+/// default order's extraction always computed it, so YXZ keeps its bits.
+inline float rotation_element(const Quat &q, int row, int col) noexcept {
+  if (row == col) {
+    const float a = (row == 0) ? q.y : q.x;
+    const float b = (row == 2) ? q.y : q.z;
+    return 1.0F - (2.0F * ((a * a) + (b * b)));
+  }
+  const RotationTerms t = rotation_terms(q, row, col);
+  return t.plus ? (2.0F * ((t.lo * t.hi) + (q.w * t.third)))
+                : (2.0F * ((t.lo * t.hi) - (q.w * t.third)));
+}
+
+/// The negated off-diagonal element. A minus-type element is negated by
+/// swapping its operands, 2 * ((w * third) - (lo * hi)), which is how the
+/// default order's pitch was always computed and, unlike negating the
+/// result, gives +0 rather than -0 for a zero element.
+inline float negated_rotation_element(const Quat &q, int row,
+                                      int col) noexcept {
+  const RotationTerms t = rotation_terms(q, row, col);
+  return t.plus ? -(2.0F * ((t.lo * t.hi) + (q.w * t.third)))
+                : (2.0F * ((q.w * t.third) - (t.lo * t.hi)));
+}
+
+} // namespace detail
+
 // Euler convention: pitch is rotation about +X, yaw about +Y, roll about +Z.
 // Composition order is q = qy(yaw) * qx(pitch) * qz(roll).
 inline Quat from_euler(float pitchRad, float yawRad, float rollRad) noexcept {
@@ -264,53 +501,88 @@ inline Quat from_euler(float pitchRad, float yawRad, float rollRad) noexcept {
               cy * cp * sr - sy * sp * cr, cy * cp * cr + sy * sp * sr);
 }
 
-/// Extracts Euler angles that reconstruct q under from_euler's exact
-/// composition order (q = qy(yaw) * qx(pitch) * qz(roll); derived from the
-/// Ry*Rx*Rz rotation matrix product, not the independent roll/pitch/yaw
-/// formula an aircraft-attitude (ZYX) convention would use, which is a
-/// different composition and does not round-trip with this from_euler).
-/// pitch is the "middle" axis of the composition and is the one that loses
-/// a degree of freedom at the poles, so it is clamped to +-90 deg (asin
-/// domain) while yaw and roll keep the full +-180 deg range (atan2). At
-/// pitch = +-90 deg exactly (gimbal lock), yaw and roll are no longer
-/// independent -- only their sum (at the -90 pole) or difference (at the
-/// +90 pole) is observable -- so the extraction folds that combined value
-/// entirely into yaw and reports roll = 0 (the common engine convention).
-/// This still reconstructs the identical rotation on round trip (verified
-/// in tests/unit/math_test.cpp), just not necessarily the same (yaw, roll)
-/// split that produced q.
-inline bool to_euler(const Quat &q, float *outPitch, float *outYaw,
-                     float *outRoll) noexcept {
+/// from_euler in any order. YXZ is the closed form above, whose bits the
+/// navigation agents and saved scenes already depend on; the other orders
+/// compose their three axis rotations.
+inline Quat from_euler(float pitchRad, float yawRad, float rollRad,
+                       EulerOrder order) noexcept {
+  if (order == EulerOrder::YXZ) {
+    return from_euler(pitchRad, yawRad, rollRad);
+  }
+  const float angles[3] = {pitchRad, yawRad, rollRad};
+  int a = 0;
+  int b = 0;
+  int c = 0;
+  detail::euler_axes(order, &a, &b, &c);
+  return mul(mul(detail::axis_rotation(a, angles[a]),
+                 detail::axis_rotation(b, angles[b])),
+             detail::axis_rotation(c, angles[c]));
+}
+
+/// Extracts Euler angles that reconstruct `q` under from_euler(order).
+/// The middle axis of the order is the one that loses a degree of freedom
+/// at its poles, so its angle is clamped to +-90 deg (asin domain) while
+/// the outer two keep the full +-180 deg range (atan2). At the pole
+/// (gimbal lock) the outer two are no longer independent -- only their sum
+/// or difference is observable -- so the extraction folds that combined
+/// value entirely into the first axis and reports the last as 0, the
+/// common engine convention. That still reconstructs the identical
+/// rotation, just not necessarily the split that produced q.
+inline bool to_euler(const Quat &q, EulerOrder order, float *outPitch,
+                     float *outYaw, float *outRoll) noexcept {
   if ((outPitch == nullptr) || (outYaw == nullptr) || (outRoll == nullptr)) {
     return false;
   }
+  int a = 0;
+  int b = 0;
+  int c = 0;
+  detail::euler_axes(order, &a, &b, &c);
+  // +1 when (a, b, c) is a cyclic permutation of (X, Y, Z).
+  const bool even = ((a + 1) % 3) == b;
 
-  float sinPitch = 2.0F * ((q.w * q.x) - (q.y * q.z));
-  if (sinPitch > 1.0F) {
-    sinPitch = 1.0F;
-  } else if (sinPitch < -1.0F) {
-    sinPitch = -1.0F;
+  // For q = Ra Rb Rc, the matrix element (a, c) is +-sin of the middle
+  // angle, with the permutation's parity as its sign.
+  float sinMiddle = even ? detail::rotation_element(q, a, c)
+                         : detail::negated_rotation_element(q, a, c);
+  if (sinMiddle > 1.0F) {
+    sinMiddle = 1.0F;
+  } else if (sinMiddle < -1.0F) {
+    sinMiddle = -1.0F;
   }
-  *outPitch = det_asin(sinPitch);
+  float angles[3] = {0.0F, 0.0F, 0.0F};
+  angles[b] = det_asin(sinMiddle);
 
-  if (std::fabs(sinPitch) > 0.999999F) {
-    // Gimbal lock: R[0][0]/R[0][1] (unlike the general-case pair below)
-    // stay well-conditioned at the pole and encode yaw -+ roll depending
-    // on pole sign; folding the whole combined angle into yaw and zeroing
-    // roll reconstructs q exactly (the (yaw, roll) split itself is not
-    // recoverable, matching the documented ambiguity above).
-    const float sign = (sinPitch >= 0.0F) ? 1.0F : -1.0F;
-    *outYaw = sign * det_atan2(2.0F * ((q.x * q.y) - (q.w * q.z)),
-                               1.0F - (2.0F * ((q.y * q.y) + (q.z * q.z))));
-    *outRoll = 0.0F;
+  if (std::fabs(sinMiddle) > 0.999999F) {
+    // Gimbal lock: with the last angle 0, column b of the matrix is the
+    // first axis's rotation of the middle axis, whose (b, a) and (b, b)
+    // elements stay well-conditioned at the pole and give the combined
+    // angle.
+    const float sign = (sinMiddle >= 0.0F) ? 1.0F : -1.0F;
+    angles[a] = sign * det_atan2(detail::rotation_element(q, b, a),
+                                 detail::rotation_element(q, b, b));
+    angles[c] = 0.0F;
   } else {
-    *outYaw = det_atan2(2.0F * ((q.x * q.z) + (q.w * q.y)),
-                        1.0F - (2.0F * ((q.x * q.x) + (q.y * q.y))));
-    *outRoll = det_atan2(2.0F * ((q.x * q.y) + (q.w * q.z)),
-                         1.0F - (2.0F * ((q.x * q.x) + (q.z * q.z))));
+    const float bc = even ? detail::negated_rotation_element(q, b, c)
+                          : detail::rotation_element(q, b, c);
+    const float ab = even ? detail::negated_rotation_element(q, a, b)
+                          : detail::rotation_element(q, a, b);
+    angles[a] = det_atan2(bc, detail::rotation_element(q, c, c));
+    angles[c] = det_atan2(ab, detail::rotation_element(q, a, a));
   }
 
+  *outPitch = angles[0];
+  *outYaw = angles[1];
+  *outRoll = angles[2];
   return true;
+}
+
+/// to_euler in the default order (YXZ): q = qy(yaw) * qx(pitch) *
+/// qz(roll), the Ry*Rx*Rz matrix product (not the aircraft-attitude ZYX
+/// formula, which does not round-trip with this from_euler); pitch is the
+/// middle angle. Round trips are verified in tests/unit/math_test.cpp.
+inline bool to_euler(const Quat &q, float *outPitch, float *outYaw,
+                     float *outRoll) noexcept {
+  return to_euler(q, EulerOrder::YXZ, outPitch, outYaw, outRoll);
 }
 
 } // namespace engine::math
