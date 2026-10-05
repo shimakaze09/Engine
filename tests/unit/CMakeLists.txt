@@ -631,6 +631,16 @@ engine_add_test_executable(engine_unit_lua_error_diagnostic
     engine_core
 )
 
+engine_add_test_executable(engine_unit_lua_math_values
+    SOURCES
+    lua_math_values_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+    engine_math
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_lua_deterministic_math
     SOURCES
     lua_deterministic_math_test.cpp
