@@ -994,6 +994,11 @@ bool read_script_behaviour(const core::JsonParser &parser,
     if (!gotPath) {
       return false;
     }
+    // Walked by position to refuse other keys; a lookup by name is what
+    // records a member as read for the unread-key report.
+    core::JsonValue lookedUp{};
+    static_cast<void>(parser.get_object_field(value, "scriptPath", &lookedUp));
+    static_cast<void>(parser.get_object_field(value, "enabled", &lookedUp));
   } else {
     return false;
   }

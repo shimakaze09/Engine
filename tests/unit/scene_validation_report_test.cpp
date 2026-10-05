@@ -225,6 +225,37 @@ int main() {
     static_cast<void>(std::remove("scene_validation_props.lua"));
   }
 
+  // --- A behaviour list's entries and per-behaviour overrides are read ---
+  {
+    ctx.check(core::vfs_write_text("assets/scene_validation_a.lua", "-- a\n",
+                                   5U) &&
+                  core::vfs_write_text("assets/scene_validation_b.lua",
+                                       "-- b\n", 5U),
+              "write the two behaviour scripts");
+    core::ValidationReport report{};
+    g_sceneWarnings = 0;
+    const std::string json =
+        "{\"version\":6,\"entities\":[{\"persistentId\":31,\"components\":{"
+        "\"ScriptComponent\":[{\"scriptPath\":"
+        "\"assets/scene_validation_a.lua\",\"enabled\":false},"
+        "\"assets/scene_validation_b.lua\"],"
+        "\"ScriptProperties\":[{\"speed\":1.5},{\"speed\":4}]}}]}";
+    ctx.check(load(*world, json, &report) && report.clean() &&
+                  (g_sceneWarnings == 0),
+              "a disabled entry and per-behaviour overrides load with no "
+              "finding and no warning");
+    std::unique_ptr<char[]> saved{};
+    std::size_t savedSize = 0U;
+    core::ValidationReport reloaded{};
+    ctx.check(
+        rt::save_scene(*world, &saved, &savedSize) &&
+            load(*world, std::string(saved.get(), savedSize), &reloaded) &&
+            reloaded.clean(),
+        "a saved behaviour list is read back with no finding");
+    static_cast<void>(std::remove("scene_validation_a.lua"));
+    static_cast<void>(std::remove("scene_validation_b.lua"));
+  }
+
   // --- Past 32 unknown keys the log stops listing them ---
   {
     core::ValidationReport report{};
