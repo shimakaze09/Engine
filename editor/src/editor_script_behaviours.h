@@ -33,7 +33,8 @@ struct ScriptBehavioursCommand final : EditorCommand {
   std::size_t memory_bytes() const noexcept override { return sizeof(*this); }
 
 private:
-  /// Applies one endpoint: the list first, then the overrides.
+  /// Applies one endpoint: the list first, then the overrides; when the
+  /// overrides are refused the list is put back and nothing has changed.
   bool apply_state(bool scriptExists, bool propertiesExist,
                    const ComponentEditSnapshot &snapshot) noexcept;
 };

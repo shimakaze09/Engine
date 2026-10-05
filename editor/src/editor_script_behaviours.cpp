@@ -76,10 +76,29 @@ bool ScriptBehavioursCommand::apply_state(
     bool scriptExists, bool propertiesExist,
     const ComponentEditSnapshot &snapshot) noexcept {
   const runtime::Entity target = resolve_command_target(entity, persistentId);
-  return apply_component_snapshot(ComponentEditType::Script, target,
-                                  scriptExists, snapshot) &&
-         apply_component_snapshot(ComponentEditType::ScriptProperties, target,
-                                  propertiesExist, snapshot);
+  ComponentEditSnapshot current{};
+  const bool scriptWas =
+      capture_component_snapshot(ComponentEditType::Script, target, &current);
+  const bool propertiesWere = capture_component_snapshot(
+      ComponentEditType::ScriptProperties, target, &current);
+  if (!apply_component_snapshot(ComponentEditType::Script, target,
+                                scriptExists, snapshot)) {
+    return false;
+  }
+  // An entity without overrides holds no overrides component, so an
+  // endpoint without one has nothing left to remove.
+  if (!propertiesExist && !propertiesWere) {
+    return true;
+  }
+  if (apply_component_snapshot(ComponentEditType::ScriptProperties, target,
+                               propertiesExist, snapshot)) {
+    return true;
+  }
+  // The overrides were refused: put the list back, so a failed command
+  // never leaves half of its edit in the World.
+  static_cast<void>(apply_component_snapshot(ComponentEditType::Script, target,
+                                             scriptWas, current));
+  return false;
 }
 
 bool execute_script_behaviours_edit(

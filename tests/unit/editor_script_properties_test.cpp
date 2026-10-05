@@ -255,6 +255,56 @@ void check_behaviour_list_undo() {
   engine::editor::editor_session().world = previous;
 }
 
+/// An entity whose script has no overrides holds no overrides component.
+/// Adding a behaviour to it is still one undoable command: observed on
+/// 2026-10-05 in the editor, Add Behaviour changed the list but recorded
+/// nothing, because the command tried to remove the absent component.
+void check_behaviour_add_without_overrides() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  check(world != nullptr, "add without overrides: world");
+  if (world == nullptr) {
+    return;
+  }
+  world->end_frame_phase();
+  World *previous = engine::editor::editor_session().world;
+  engine::editor::editor_session().world = world.get();
+  auto &history = engine::editor::editor_session().commandHistory;
+  history.clear();
+  const Entity entity = world->create_scene_object();
+
+  engine::runtime::ScriptComponent list{};
+  check(engine::runtime::script_behaviour_append(&list, "a.lua") &&
+            world->add_script_component(entity, list) &&
+            (world->get_script_properties_ptr(entity) == nullptr),
+        "add without overrides: one behaviour and no overrides component");
+
+  engine::runtime::ScriptComponent added = list;
+  check(engine::runtime::script_behaviour_append(&added, "b.lua") &&
+            engine::editor::execute_script_behaviours_edit(
+                entity, added, ScriptPropertiesComponent{}),
+        "add without overrides: adding a behaviour runs as a command");
+  const engine::runtime::ScriptComponent *storedList =
+      world->get_script_component_ptr(entity);
+  check((storedList != nullptr) && same_list(*storedList, added) &&
+            (world->get_script_properties_ptr(entity) == nullptr) &&
+            history.can_undo(),
+        "add without overrides: the list gains it, no overrides component "
+        "appears, and the edit can be undone");
+
+  check(history.undo(), "add without overrides: undo succeeds");
+  storedList = world->get_script_component_ptr(entity);
+  check((storedList != nullptr) && same_list(*storedList, list) &&
+            (world->get_script_properties_ptr(entity) == nullptr),
+        "add without overrides: one undo restores the one-behaviour list");
+  check(history.redo(), "add without overrides: redo succeeds");
+  storedList = world->get_script_component_ptr(entity);
+  check((storedList != nullptr) && same_list(*storedList, added),
+        "add without overrides: redo adds it again");
+
+  history.clear();
+  engine::editor::editor_session().world = previous;
+}
+
 } // namespace
 
 /// Runs the Script section property suite.
@@ -264,6 +314,7 @@ int main() {
   check_schema_cache();
   check_undo();
   check_behaviour_list_undo();
+  check_behaviour_add_without_overrides();
   if (g_failures != 0) {
     std::fprintf(stderr, "%d editor script property check(s) failed\n",
                  g_failures);
