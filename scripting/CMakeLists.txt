@@ -23,6 +23,8 @@ engine_add_module_library(engine_scripting
     src/script_property_scan.cpp
     src/script_property_bindings.cpp
     src/deterministic_math_library.cpp
+    src/interpolation_math_library.cpp
+    src/lua_math_values.cpp
     src/animation_bindings.cpp
     src/asset_bindings.cpp
     src/audio_bindings.cpp

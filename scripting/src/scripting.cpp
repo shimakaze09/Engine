@@ -22,7 +22,9 @@
 #include "entity_script_bindings.h"
 #include "game_bindings.h"
 #include "input_bindings.h"
+#include "interpolation_math_library.h"
 #include "light_bindings.h"
+#include "lua_math_values.h"
 #include "lua_state.h"
 #include "mesh_material_bindings.h"
 #include "navigation_bindings.h"
@@ -346,6 +348,10 @@ int open_libraries_trampoline(lua_State *state) noexcept {
   // script reaching for either by habit still gets a reproducible
   // draw instead of an operating-system seeded one.
   install_engine_random_over_math(state);
+  // The interpolation laws and the vector and rotation values the math
+  // library owns, so scripts blend and turn as engine code does.
+  install_interpolation_math(state);
+  install_math_values(state);
   luaL_requiref(state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
   lua_pop(state, 1);
   register_engine_bindings(state);

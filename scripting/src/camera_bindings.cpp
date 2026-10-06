@@ -103,14 +103,15 @@ int lua_engine_add_spring_arm(lua_State *state) noexcept {
   runtime::SpringArmComponent arm{};
   arm.armLength = static_cast<float>(luaL_checknumber(state, 2));
   arm.currentLength = arm.armLength;
-  arm.offset.x = static_cast<float>(luaL_checknumber(state, 3));
-  arm.offset.y = static_cast<float>(luaL_checknumber(state, 4));
-  arm.offset.z = static_cast<float>(luaL_checknumber(state, 5));
-  if (lua_isnumber(state, 6)) {
-    arm.lagSpeed = static_cast<float>(lua_tonumber(state, 6));
+  int arg = 3;
+  if (!read_vec3_arg(state, &arg, &arm.offset)) {
+    return luaL_argerror(state, 3, "an offset: a vec3 or three numbers");
   }
-  if (lua_isboolean(state, 7)) {
-    arm.collisionEnabled = (lua_toboolean(state, 7) != 0);
+  if (lua_isnumber(state, arg)) {
+    arm.lagSpeed = static_cast<float>(lua_tonumber(state, arg));
+  }
+  if (lua_isboolean(state, arg + 1)) {
+    arm.collisionEnabled = (lua_toboolean(state, arg + 1) != 0);
   }
   const bool ok = apply_or_queue_spring_arm(entity, arm);
   lua_pushboolean(state, ok ? 1 : 0);

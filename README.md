@@ -550,6 +550,39 @@ Current scripting/runtime support in the tree includes:
   simulation steps, not rendered frames), and `engine.wait_until()`
 - Sandbox, generated binding, and hot-reload coverage in integration tests
 
+Positions, directions and rotations are values, as Unity's `Vector3`
+and `Quaternion` and Godot's `Vector3` and `Quaternion` are:
+`vec2(x, y)`, `vec3(x, y, z)` and `quat(x, y, z, w)`, with `+`, `-`,
+`*` by a number, `/`, unary `-`, `==` and fields `.x`, `.y`, `.z`,
+`.w`. A value never changes; arithmetic makes a new one. `vec3` has
+`length`, `length_sq`, `normalized`, `dot`, `cross`, `distance`, `lerp`,
+`move_towards`, `exp_decay` and `smooth_damp`, and the constants
+`vec3.zero`, `one`, `up`, `down`, `left`, `right`, `forward` (-Z, the way
+a camera looks) and `back`. `quat` has `quat.euler(pitch, yaw, roll
+[, order])` in radians (the default order is YXZ, the Inspector's;
+`"XYZ"` and the other four are accepted), `quat.angle_axis(radians,
+axis)`, `quat.from_to(a, b)`, `quat.look_rotation(forward [, up])`,
+`slerp`, `nlerp`, `rotate_towards`, `angle`, `inverse`, `to_euler`, and
+`forward`, `right`, `up` and `back`; `q * v` rotates a vector and
+`q1 * q2` composes, right-hand first. Every binding that takes a point,
+direction or colour as three numbers also takes a `vec3`, and
+`set_rotation` a `quat`, so `engine.set_position(e, p + vec3.up)` and
+`engine.raycast(origin, dir, 50)` work; a value of the wrong kind is
+refused like a non-number. Getters still return numbers, and
+`vec3(engine.get_position(e))` makes a value of them;
+`engine.get_forward(e)`, `get_right(e)` and `get_up(e)` give an entity's
+axes. The `math` table adds `lerp`, `inverse_lerp`, `remap`, `clamp`
+(which refuses bounds out of order), `saturate`, `smoothstep`,
+`move_towards`, `move_towards_angle`, `exp_decay` (an approach that
+converges at the same rate whatever the step), `smooth_damp(current,
+target, velocity, smooth_time, dt [, max_speed])`, which returns the value
+and the new velocity, `wrap_angle`, `delta_angle`, `lerp_angle`,
+`wrap(value, length)` and `ping_pong`. All of it is the engine's own math
+in single precision, so a script turns and blends exactly as engine code
+does, on every platform (`engine_unit_lua_math_values`,
+`engine_integration_determinism`). Colour values come with the colour
+type (#1126).
+
 Only a Camera renders the game, as in Unity and Godot. The Game view and
 the player draw the highest-priority active Camera component, from its
 entity's transform; with none, they show black, and the editor's Game

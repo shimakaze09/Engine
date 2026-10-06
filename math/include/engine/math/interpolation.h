@@ -36,9 +36,15 @@ constexpr float remap(float value, float inA, float inB, float outA,
   return lerp(outA, outB, inverse_lerp(inA, inB, value));
 }
 
+/// Clamps to [lo, hi]; NaN gives lo. The bounds must be ordered (lo <= hi),
+/// which a caller taking them from input checks first.
+constexpr float clamp(float value, float lo, float hi) noexcept {
+  return (value > lo) ? ((value < hi) ? value : hi) : lo;
+}
+
 /// Clamps to [0, 1]; NaN gives 0.
 constexpr float saturate(float value) noexcept {
-  return (value > 0.0F) ? ((value < 1.0F) ? value : 1.0F) : 0.0F;
+  return clamp(value, 0.0F, 1.0F);
 }
 
 /// Hermite step: 0 at or below edge0, 1 at or above edge1, and

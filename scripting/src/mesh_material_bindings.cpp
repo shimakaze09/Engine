@@ -7,6 +7,7 @@
 #include "binding_util.h"
 #include "deferred_mutations.h"
 #include "entity_handle.h"
+#include "lua_math_values.h"
 #include "lua_state.h"
 #include "reload_transaction.h"
 #include "runtime_binding.h"
@@ -107,15 +108,19 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
 
   math::Vec3 pos{};
   math::Vec3 albedo(1.0F, 1.0F, 1.0F);
-  if (!read_vec3_args(state, 2, &pos)) {
+  int vectorArg = 2;
+  if (!read_vec3_arg(state, &vectorArg, &pos)) {
     lua_pushnil(state);
     return 1;
   }
-  if (lua_isnumber(state, 5) && lua_isnumber(state, 6) &&
-      lua_isnumber(state, 7)) {
-    albedo.x = static_cast<float>(lua_tonumber(state, 5));
-    albedo.y = static_cast<float>(lua_tonumber(state, 6));
-    albedo.z = static_cast<float>(lua_tonumber(state, 7));
+  // The colour is optional and passed on as given, a non-finite one
+  // included, so the World refuses it and the spawn fails whole.
+  if (!to_vec3_value(state, vectorArg, &albedo) &&
+      lua_isnumber(state, vectorArg) && lua_isnumber(state, vectorArg + 1) &&
+      lua_isnumber(state, vectorArg + 2)) {
+    albedo.x = static_cast<float>(lua_tonumber(state, vectorArg));
+    albedo.y = static_cast<float>(lua_tonumber(state, vectorArg + 1));
+    albedo.z = static_cast<float>(lua_tonumber(state, vectorArg + 2));
   }
 
   const char *shape = lua_tostring(state, 1);
@@ -226,7 +231,8 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
 int lua_engine_set_albedo(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 albedo{};
-  if (!read_entity(state, 1, &entity) || !read_vec3_args(state, 2, &albedo)) {
+  int vectorArg = 2;
+  if (!read_entity(state, 1, &entity) || !read_vec3_arg(state, &vectorArg, &albedo)) {
     lua_pushboolean(state, 0);
     return 1;
   }

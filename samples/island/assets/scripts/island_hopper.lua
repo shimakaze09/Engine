@@ -129,8 +129,7 @@ end
 local function animate_pickup(name, angle)
     local e = engine.find_entity_by_name(name)
     if e ~= nil then
-        engine.set_rotation(e, 0.0, math.sin(angle * 0.5), 0.0,
-            math.cos(angle * 0.5))
+        engine.set_rotation(e, quat.angle_axis(angle, vec3.up))
     end
 end
 

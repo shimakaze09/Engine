@@ -56,7 +56,11 @@ bool write_main_script() noexcept {
 /// the table's first key into this entity's position, so either one
 /// diverging moves a transform the hash covers. The fold is
 /// multiplicative and order-sensitive, so a divergence on any tick
-/// survives to the end of the run instead of averaging away.
+/// survives to the end of the run instead of averaging away. A third
+/// source is the vector and rotation values: a slerped heading, a rotated
+/// and normalized offset and an exponential approach, which run the
+/// deterministic trigonometry, square roots and det_exp, reach the
+/// entity's rotation and its y and z, while x stays the fold.
 bool write_random_script() noexcept {
   std::FILE *file = nullptr;
 #ifdef _WIN32
@@ -72,6 +76,8 @@ bool write_random_script() noexcept {
   const char *contents =
       "local M = {}\n"
       "local fold = 1.0\n"
+      "local heading = quat()\n"
+      "local drift = vec3()\n"
       "local names = {'alpha', 'bravo', 'charlie', 'delta',\n"
       "               'echo', 'foxtrot', 'golf', 'hotel'}\n"
       "function M.on_begin_play(self)\n"
@@ -84,7 +90,11 @@ bool write_random_script() noexcept {
       "    local first = 0\n"
       "    for _, v in pairs(keyed) do first = v; break end\n"
       "    fold = (fold * 1.31 + draw + first * 0.01) % 7.0\n"
-      "    engine.set_position(self, fold, 40.0, draw)\n"
+      "    heading = quat.slerp(heading, quat.euler(0.3, fold, draw), 0.25)\n"
+      "    local offset = (heading * vec3(1.0, draw, fold)):normalized()\n"
+      "    drift = vec3.exp_decay(drift, offset * 3.0, 4.0, dt)\n"
+      "    engine.set_position(self, vec3(fold, 40.0 + drift.y, draw + drift.z))\n"
+      "    engine.set_rotation(self, heading)\n"
       "end\n"
       "return M\n";
   const std::size_t length = std::char_traits<char>::length(contents);

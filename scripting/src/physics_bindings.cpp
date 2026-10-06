@@ -107,8 +107,9 @@ int lua_engine_add_capsule_collider(lua_State *state) noexcept {
 int lua_engine_add_collider(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 halfExtents{};
+  int vectorArg = 2;
   if (!read_entity(state, 1, &entity) ||
-      !read_vec3_args(state, 2, &halfExtents)) {
+      !read_vec3_arg(state, &vectorArg, &halfExtents)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -486,8 +487,9 @@ int lua_engine_remove_character_controller(lua_State *state) noexcept {
 int lua_engine_move_character(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 displacement{};
+  int vectorArg = 2;
   if (!runtime_bound() || !read_entity(state, 1, &entity) ||
-      !read_vec3_args(state, 2, &displacement)) {
+      !read_vec3_arg(state, &vectorArg, &displacement)) {
     lua_pushnil(state);
     return 1;
   }
@@ -571,12 +573,10 @@ int lua_engine_is_trigger(lua_State *state) noexcept {
 // engine.set_gravity([x [, y [, z]]]); an omitted component is zero, a
 // present one must be a finite number or the whole call is rejected.
 int lua_engine_set_gravity(lua_State *state) noexcept {
-  float x = 0.0F;
-  float y = 0.0F;
-  float z = 0.0F;
-  if (!read_optional_finite_number_arg(state, 1, 0.0F, &x) ||
-      !read_optional_finite_number_arg(state, 2, 0.0F, &y) ||
-      !read_optional_finite_number_arg(state, 3, 0.0F, &z)) {
+  math::Vec3 gravity{};
+  int arg = 1;
+  if (!read_optional_vec3_arg(state, &arg, math::Vec3(0.0F, 0.0F, 0.0F),
+                              &gravity)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_gravity rejected: components must be finite "
                       "numbers; gravity unchanged");
@@ -585,7 +585,8 @@ int lua_engine_set_gravity(lua_State *state) noexcept {
   if ((runtime_binding().services != nullptr) &&
       (runtime_binding().services->set_gravity != nullptr) &&
       !reload_refuses("set_gravity")) {
-    runtime_binding().services->set_gravity(runtime_binding().world, x, y, z);
+    runtime_binding().services->set_gravity(runtime_binding().world,
+                                            gravity.x, gravity.y, gravity.z);
   }
   return 0;
 }
@@ -621,15 +622,16 @@ int lua_engine_raycast(lua_State *state) noexcept {
   math::Vec3 direction{};
   float maxDist = 0.0F;
   runtime::Entity skipEntity = runtime::kInvalidEntity;
-  if (!read_vec3_args(state, 1, &origin) ||
-      !read_vec3_args(state, 4, &direction) ||
-      !read_finite_number_arg(state, 7, &maxDist) ||
-      !read_optional_skip_entity(state, 8, &skipEntity)) {
+  int arg = 1;
+  if (!read_vec3_arg(state, &arg, &origin) ||
+      !read_vec3_arg(state, &arg, &direction) ||
+      !read_finite_number_arg(state, arg, &maxDist) ||
+      !read_optional_skip_entity(state, arg + 1, &skipEntity)) {
     lua_pushnil(state);
     return 1;
   }
   std::uint32_t mask = 0xFFFFFFFFU;
-  if (!read_optional_layer_mask(state, 9, &mask)) {
+  if (!read_optional_layer_mask(state, arg + 2, &mask)) {
     lua_pushnil(state);
     return 1;
   }
@@ -665,19 +667,20 @@ int lua_engine_raycast_all(lua_State *state) noexcept {
   math::Vec3 origin{};
   math::Vec3 direction{};
   float maxDist = 0.0F;
-  if (!read_vec3_args(state, 1, &origin) ||
-      !read_vec3_args(state, 4, &direction) ||
-      !read_finite_number_arg(state, 7, &maxDist)) {
+  int arg = 1;
+  if (!read_vec3_arg(state, &arg, &origin) ||
+      !read_vec3_arg(state, &arg, &direction) ||
+      !read_finite_number_arg(state, arg, &maxDist)) {
     lua_newtable(state);
     return 1;
   }
   std::uint32_t mask = 0xFFFFFFFFU;
-  if (!read_optional_layer_mask(state, 8, &mask)) {
+  if (!read_optional_layer_mask(state, arg + 1, &mask)) {
     lua_newtable(state);
     return 1;
   }
   runtime::Entity skipEntity = runtime::kInvalidEntity;
-  if (!read_optional_skip_entity(state, 9, &skipEntity)) {
+  if (!read_optional_skip_entity(state, arg + 2, &skipEntity)) {
     lua_newtable(state);
     return 1;
   }
@@ -721,13 +724,14 @@ int lua_engine_overlap_sphere(lua_State *state) noexcept {
   }
   math::Vec3 center{};
   float radius = 0.0F;
-  if (!read_vec3_args(state, 1, &center) ||
-      !read_finite_number_arg(state, 4, &radius)) {
+  int arg = 1;
+  if (!read_vec3_arg(state, &arg, &center) ||
+      !read_finite_number_arg(state, arg, &radius)) {
     lua_newtable(state);
     return 1;
   }
   std::uint32_t mask = 0xFFFFFFFFU;
-  if (!read_optional_layer_mask(state, 5, &mask)) {
+  if (!read_optional_layer_mask(state, arg + 1, &mask)) {
     lua_newtable(state);
     return 1;
   }
@@ -755,13 +759,14 @@ int lua_engine_overlap_box(lua_State *state) noexcept {
   }
   math::Vec3 center{};
   math::Vec3 halfExtents{};
-  if (!read_vec3_args(state, 1, &center) ||
-      !read_vec3_args(state, 4, &halfExtents)) {
+  int arg = 1;
+  if (!read_vec3_arg(state, &arg, &center) ||
+      !read_vec3_arg(state, &arg, &halfExtents)) {
     lua_newtable(state);
     return 1;
   }
   std::uint32_t mask = 0xFFFFFFFFU;
-  if (!read_optional_layer_mask(state, 7, &mask)) {
+  if (!read_optional_layer_mask(state, arg, &mask)) {
     lua_newtable(state);
     return 1;
   }
@@ -812,20 +817,21 @@ int lua_engine_sweep_sphere(lua_State *state) noexcept {
   float radius = 0.0F;
   math::Vec3 direction{};
   float maxDist = 0.0F;
-  if (!read_vec3_args(state, 1, &origin) ||
-      !read_finite_number_arg(state, 4, &radius) ||
-      !read_vec3_args(state, 5, &direction) ||
-      !read_finite_number_arg(state, 8, &maxDist)) {
+  int arg = 1;
+  if (!read_vec3_arg(state, &arg, &origin) ||
+      !read_finite_number_arg(state, arg++, &radius) ||
+      !read_vec3_arg(state, &arg, &direction) ||
+      !read_finite_number_arg(state, arg, &maxDist)) {
     lua_pushnil(state);
     return 1;
   }
   std::uint32_t mask = 0xFFFFFFFFU;
-  if (!read_optional_layer_mask(state, 9, &mask)) {
+  if (!read_optional_layer_mask(state, arg + 1, &mask)) {
     lua_pushnil(state);
     return 1;
   }
   runtime::Entity skipEntity = runtime::kInvalidEntity;
-  if (!read_optional_skip_entity(state, 10, &skipEntity)) {
+  if (!read_optional_skip_entity(state, arg + 2, &skipEntity)) {
     lua_pushnil(state);
     return 1;
   }
@@ -863,20 +869,21 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
   math::Vec3 halfExtents{};
   math::Vec3 direction{};
   float maxDist = 0.0F;
-  if (!read_vec3_args(state, 1, &center) ||
-      !read_vec3_args(state, 4, &halfExtents) ||
-      !read_vec3_args(state, 7, &direction) ||
-      !read_finite_number_arg(state, 10, &maxDist)) {
+  int arg = 1;
+  if (!read_vec3_arg(state, &arg, &center) ||
+      !read_vec3_arg(state, &arg, &halfExtents) ||
+      !read_vec3_arg(state, &arg, &direction) ||
+      !read_finite_number_arg(state, arg, &maxDist)) {
     lua_pushnil(state);
     return 1;
   }
   std::uint32_t mask = 0xFFFFFFFFU;
-  if (!read_optional_layer_mask(state, 11, &mask)) {
+  if (!read_optional_layer_mask(state, arg + 1, &mask)) {
     lua_pushnil(state);
     return 1;
   }
   runtime::Entity skipEntity = runtime::kInvalidEntity;
-  if (!read_optional_skip_entity(state, 12, &skipEntity)) {
+  if (!read_optional_skip_entity(state, arg + 2, &skipEntity)) {
     lua_pushnil(state);
     return 1;
   }
@@ -914,21 +921,22 @@ int lua_engine_sweep_capsule(lua_State *state) noexcept {
   float radius = 0.0F;
   math::Vec3 direction{};
   float maxDist = 0.0F;
-  if (!read_vec3_args(state, 1, &pointA) ||
-      !read_vec3_args(state, 4, &pointB) ||
-      !read_finite_number_arg(state, 7, &radius) ||
-      !read_vec3_args(state, 8, &direction) ||
-      !read_finite_number_arg(state, 11, &maxDist)) {
+  int arg = 1;
+  if (!read_vec3_arg(state, &arg, &pointA) ||
+      !read_vec3_arg(state, &arg, &pointB) ||
+      !read_finite_number_arg(state, arg++, &radius) ||
+      !read_vec3_arg(state, &arg, &direction) ||
+      !read_finite_number_arg(state, arg, &maxDist)) {
     lua_pushnil(state);
     return 1;
   }
   std::uint32_t mask = 0xFFFFFFFFU;
-  if (!read_optional_layer_mask(state, 12, &mask)) {
+  if (!read_optional_layer_mask(state, arg + 1, &mask)) {
     lua_pushnil(state);
     return 1;
   }
   runtime::Entity skipEntity = runtime::kInvalidEntity;
-  if (!read_optional_skip_entity(state, 13, &skipEntity)) {
+  if (!read_optional_skip_entity(state, arg + 2, &skipEntity)) {
     lua_pushnil(state);
     return 1;
   }
@@ -1024,18 +1032,13 @@ int lua_engine_add_hinge_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  float px = 0.0F;
-  float py = 0.0F;
-  float pz = 0.0F;
-  float ax = 0.0F;
-  float ay = 1.0F;
-  float az = 0.0F;
-  if (!read_optional_finite_number_arg(state, 3, 0.0F, &px) ||
-      !read_optional_finite_number_arg(state, 4, 0.0F, &py) ||
-      !read_optional_finite_number_arg(state, 5, 0.0F, &pz) ||
-      !read_optional_finite_number_arg(state, 6, 0.0F, &ax) ||
-      !read_optional_finite_number_arg(state, 7, 1.0F, &ay) ||
-      !read_optional_finite_number_arg(state, 8, 0.0F, &az)) {
+  math::Vec3 pivot{};
+  math::Vec3 axis{};
+  int arg = 3;
+  if (!read_optional_vec3_arg(state, &arg, math::Vec3(0.0F, 0.0F, 0.0F),
+                              &pivot) ||
+      !read_optional_vec3_arg(state, &arg, math::Vec3(0.0F, 1.0F, 0.0F),
+                              &axis)) {
     lua_pushnil(state);
     return 1;
   }
@@ -1044,7 +1047,8 @@ int lua_engine_add_hinge_joint(lua_State *state) noexcept {
     return 1;
   }
   const std::uint32_t id = runtime_binding().services->add_hinge_joint(
-      runtime_binding().world, entityA, entityB, px, py, pz, ax, ay, az);
+      runtime_binding().world, entityA, entityB, pivot.x, pivot.y, pivot.z,
+      axis.x, axis.y, axis.z);
   return push_joint_result(state, id);
 }
 
@@ -1059,12 +1063,10 @@ int lua_engine_add_ball_socket_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  float px = 0.0F;
-  float py = 0.0F;
-  float pz = 0.0F;
-  if (!read_optional_finite_number_arg(state, 3, 0.0F, &px) ||
-      !read_optional_finite_number_arg(state, 4, 0.0F, &py) ||
-      !read_optional_finite_number_arg(state, 5, 0.0F, &pz)) {
+  math::Vec3 pivot{};
+  int arg = 3;
+  if (!read_optional_vec3_arg(state, &arg, math::Vec3(0.0F, 0.0F, 0.0F),
+                              &pivot)) {
     lua_pushnil(state);
     return 1;
   }
@@ -1073,7 +1075,7 @@ int lua_engine_add_ball_socket_joint(lua_State *state) noexcept {
     return 1;
   }
   const std::uint32_t id = runtime_binding().services->add_ball_socket_joint(
-      runtime_binding().world, entityA, entityB, px, py, pz);
+      runtime_binding().world, entityA, entityB, pivot.x, pivot.y, pivot.z);
   return push_joint_result(state, id);
 }
 
@@ -1087,12 +1089,10 @@ int lua_engine_add_slider_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  float ax = 1.0F;
-  float ay = 0.0F;
-  float az = 0.0F;
-  if (!read_optional_finite_number_arg(state, 3, 1.0F, &ax) ||
-      !read_optional_finite_number_arg(state, 4, 0.0F, &ay) ||
-      !read_optional_finite_number_arg(state, 5, 0.0F, &az)) {
+  math::Vec3 axis{};
+  int arg = 3;
+  if (!read_optional_vec3_arg(state, &arg, math::Vec3(1.0F, 0.0F, 0.0F),
+                              &axis)) {
     lua_pushnil(state);
     return 1;
   }
@@ -1101,7 +1101,7 @@ int lua_engine_add_slider_joint(lua_State *state) noexcept {
     return 1;
   }
   const std::uint32_t id = runtime_binding().services->add_slider_joint(
-      runtime_binding().world, entityA, entityB, ax, ay, az);
+      runtime_binding().world, entityA, entityB, axis.x, axis.y, axis.z);
   return push_joint_result(state, id);
 }
 
@@ -1194,8 +1194,9 @@ int lua_engine_get_half_extents(lua_State *state) noexcept {
 int lua_engine_set_half_extents(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 halfExtents{};
+  int vectorArg = 2;
   if (!read_entity(state, 1, &entity) ||
-      !read_vec3_args(state, 2, &halfExtents)) {
+      !read_vec3_arg(state, &vectorArg, &halfExtents)) {
     lua_pushboolean(state, 0);
     return 1;
   }

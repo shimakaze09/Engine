@@ -63,7 +63,8 @@ int lua_engine_get_position(lua_State *state) noexcept {
 int lua_engine_set_position(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 position{};
-  if (!read_entity(state, 1, &entity) || !read_vec3_args(state, 2, &position)) {
+  int vectorArg = 2;
+  if (!read_entity(state, 1, &entity) || !read_vec3_arg(state, &vectorArg, &position)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -137,7 +138,8 @@ bool refuse_static_motion(const runtime::RigidBody &rigidBody,
 int lua_engine_set_velocity(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 velocity{};
-  if (!read_entity(state, 1, &entity) || !read_vec3_args(state, 2, &velocity)) {
+  int vectorArg = 2;
+  if (!read_entity(state, 1, &entity) || !read_vec3_arg(state, &vectorArg, &velocity)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -200,8 +202,9 @@ void store_acceleration_and_wake(runtime::RigidBody *rigidBody,
 int lua_engine_set_acceleration(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 acceleration{};
+  int vectorArg = 2;
   if (!read_entity(state, 1, &entity) ||
-      !read_vec3_args(state, 2, &acceleration)) {
+      !read_vec3_arg(state, &vectorArg, &acceleration)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -230,8 +233,9 @@ int lua_engine_set_acceleration(lua_State *state) noexcept {
 int lua_engine_set_additional_acceleration(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 additionalAcceleration{};
+  int vectorArg = 2;
   if (!read_entity(state, 1, &entity) ||
-      !read_vec3_args(state, 2, &additionalAcceleration)) {
+      !read_vec3_arg(state, &vectorArg, &additionalAcceleration)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -275,7 +279,8 @@ int lua_engine_get_angular_velocity(lua_State *state) noexcept {
 int lua_engine_set_angular_velocity(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 angVel{};
-  if (!read_entity(state, 1, &entity) || !read_vec3_args(state, 2, &angVel)) {
+  int vectorArg = 2;
+  if (!read_entity(state, 1, &entity) || !read_vec3_arg(state, &vectorArg, &angVel)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -347,25 +352,55 @@ int lua_engine_get_rotation(lua_State *state) noexcept {
   return 4;
 }
 
+/// Pushes one axis of the entity's rotation, in the space get_rotation
+/// reports (world space for an entity with no parent), or nil.
+int push_rotation_axis(lua_State *state,
+                       math::Vec3 (*axisOf)(const math::Quat &)) noexcept {
+  runtime::Entity entity{};
+  runtime::Transform transform{};
+  if (!read_entity(state, 1, &entity) ||
+      !latest_transform(entity, &transform)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  const math::Vec3 axis = axisOf(math::normalize(transform.rotation));
+  lua_pushnumber(state, static_cast<lua_Number>(axis.x));
+  lua_pushnumber(state, static_cast<lua_Number>(axis.y));
+  lua_pushnumber(state, static_cast<lua_Number>(axis.z));
+  return 3;
+}
+
+// engine.get_forward(entity) -> x, y, z: the way the entity faces (-Z).
+int lua_engine_get_forward(lua_State *state) noexcept {
+  return push_rotation_axis(
+      state, [](const math::Quat &q) noexcept { return math::forward(q); });
+}
+
+// engine.get_right(entity) -> x, y, z: the entity's +X.
+int lua_engine_get_right(lua_State *state) noexcept {
+  return push_rotation_axis(
+      state, [](const math::Quat &q) noexcept { return math::right(q); });
+}
+
+// engine.get_up(entity) -> x, y, z: the entity's +Y.
+int lua_engine_get_up(lua_State *state) noexcept {
+  return push_rotation_axis(
+      state, [](const math::Quat &q) noexcept { return math::up(q); });
+}
+
 int lua_engine_set_rotation(lua_State *state) noexcept {
   runtime::Entity entity{};
-  if (!read_entity(state, 1, &entity)) {
+  math::Quat rotation{};
+  int rotationArg = 2;
+  if (!read_entity(state, 1, &entity) ||
+      !read_quat_arg(state, &rotationArg, &rotation)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!lua_isnumber(state, 2) || !lua_isnumber(state, 3) ||
-      !lua_isnumber(state, 4) || !lua_isnumber(state, 5)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const float qx = static_cast<float>(lua_tonumber(state, 2));
-  const float qy = static_cast<float>(lua_tonumber(state, 3));
-  const float qz = static_cast<float>(lua_tonumber(state, 4));
-  const float qw = static_cast<float>(lua_tonumber(state, 5));
 
   runtime::Transform transform{};
   static_cast<void>(latest_transform(entity, &transform));
-  transform.rotation = math::Quat(qx, qy, qz, qw);
+  transform.rotation = rotation;
 
   const bool ok = apply_or_queue_transform(entity, transform, true);
   lua_pushboolean(state, ok ? 1 : 0);
@@ -380,14 +415,13 @@ int lua_engine_set_rotation(lua_State *state) noexcept {
 /// position or straight above or below it, where no one rotation is meant.
 int lua_engine_look_at(lua_State *state) noexcept {
   runtime::Entity entity{};
-  if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2) ||
-      !lua_isnumber(state, 3) || !lua_isnumber(state, 4)) {
+  math::Vec3 point{};
+  int pointArg = 2;
+  if (!read_entity(state, 1, &entity) ||
+      !read_vec3_arg(state, &pointArg, &point)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const math::Vec3 point(static_cast<float>(lua_tonumber(state, 2)),
-                         static_cast<float>(lua_tonumber(state, 3)),
-                         static_cast<float>(lua_tonumber(state, 4)));
   runtime::Transform transform{};
   math::Quat rotation{};
   if (!latest_transform(entity, &transform) ||
@@ -422,7 +456,8 @@ int lua_engine_get_scale(lua_State *state) noexcept {
 int lua_engine_set_scale(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 scale{};
-  if (!read_entity(state, 1, &entity) || !read_vec3_args(state, 2, &scale)) {
+  int vectorArg = 2;
+  if (!read_entity(state, 1, &entity) || !read_vec3_arg(state, &vectorArg, &scale)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -667,6 +702,12 @@ void register_body_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "is_sleeping");
   lua_pushcfunction(state, &lua_engine_get_rotation);
   lua_setfield(state, -2, "get_rotation");
+  lua_pushcfunction(state, &lua_engine_get_forward);
+  lua_setfield(state, -2, "get_forward");
+  lua_pushcfunction(state, &lua_engine_get_right);
+  lua_setfield(state, -2, "get_right");
+  lua_pushcfunction(state, &lua_engine_get_up);
+  lua_setfield(state, -2, "get_up");
   lua_pushcfunction(state, &lua_engine_set_rotation);
   lua_setfield(state, -2, "set_rotation");
   lua_pushcfunction(state, &lua_engine_look_at);

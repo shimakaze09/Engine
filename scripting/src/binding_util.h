@@ -7,14 +7,27 @@ struct lua_State;
 
 #include <cstddef>
 
+#include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 
 namespace engine::scripting {
 
-/// Reads three consecutive finite number args starting at startIndex into a
-/// Vec3; fails on a non-number or non-finite component.
-bool read_vec3_args(lua_State *state, int startIndex,
-                    math::Vec3 *outVec) noexcept;
+/// Reads a point, direction or colour starting at argument `*index`: a
+/// vec3 value, or three numbers as every binding took before vec3 existed.
+/// Advances `*index` past what it read (one argument or three); fails, with
+/// `*index` unchanged, on anything else or a non-finite component.
+bool read_vec3_arg(lua_State *state, int *index, math::Vec3 *outVec) noexcept;
+
+/// An optional point or direction at `*index`: a vec3 value, or three
+/// number slots, each taking its component of `defaults` when absent or
+/// nil. Advances `*index` by one or three; fails on a present non-number or
+/// non-finite component.
+bool read_optional_vec3_arg(lua_State *state, int *index,
+                            const math::Vec3 &defaults,
+                            math::Vec3 *outVec) noexcept;
+
+/// read_vec3_arg for a rotation: a quat value or four numbers x, y, z, w.
+bool read_quat_arg(lua_State *state, int *index, math::Quat *outQuat) noexcept;
 
 /// Reads one finite number arg; fails on a non-number or non-finite value.
 bool read_finite_number_arg(lua_State *state, int index,
