@@ -2,6 +2,7 @@
 // luminance, then temporal adaptation on the GPU), tonemap to the LDR final
 // target, optional FXAA ping-pong back into sceneColor, and back-buffer
 // preparation for the editor overlay.
+#include "engine/math/interpolation.h"
 #include "engine/renderer/command_buffer.h"
 
 #include "command_buffer_capture.h"
@@ -181,7 +182,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
         std::clamp(ctx.timeSeconds - backend.view().lastExposureTimeSeconds,
                    0.0F, kMaxAdaptStepSeconds);
     backend.view().lastExposureTimeSeconds = ctx.timeSeconds;
-    const float adapt[4] = {1.0F - std::exp(-speed * elapsed), minExposure,
+    const float adapt[4] = {math::exp_decay_factor(speed, elapsed), minExposure,
                             maxExposure,
                             backend.view().exposureValid ? 1.0F : 0.0F};
     const int next = 1 - backend.view().exposureCurrent;

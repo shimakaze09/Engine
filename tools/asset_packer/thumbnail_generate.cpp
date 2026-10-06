@@ -13,6 +13,7 @@
 
 #include "engine/core/atomic_file.h"
 #include "engine/core/hash.h"
+#include "engine/math/interpolation.h"
 #include "thumbnail_resample.h"
 
 // E.g. ".thumbnails/foo.png" -> ".thumbnails/foo.checksum"; shared with
@@ -444,7 +445,7 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
       dot = 0.0F;
     }
     const float ambient = 0.15F;
-    const float shade = ambient + (1.0F - ambient) * dot;
+    const float shade = engine::math::lerp(ambient, 1.0F, dot);
     const auto color = static_cast<std::uint8_t>(
         shade > 1.0F ? 255U : static_cast<unsigned>(shade * 255.0F));
 

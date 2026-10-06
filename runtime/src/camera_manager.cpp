@@ -6,19 +6,13 @@
 #include <cstdint>
 
 #include "engine/core/logging.h"
+#include "engine/math/interpolation.h"
 #include "engine/math/world_component_types.h"
 
 namespace engine::runtime {
 
 namespace {
 constexpr const char *kLogChannel = "camera";
-
-float lerp(float a, float b, float t) noexcept { return a + (b - a) * t; }
-
-math::Vec3 lerp_vec3(const math::Vec3 &a, const math::Vec3 &b,
-                     float t) noexcept {
-  return math::Vec3(lerp(a.x, b.x, t), lerp(a.y, b.y, t), lerp(a.z, b.z, t));
-}
 
 /// True when a Vec3 carries only finite components.
 bool finite_vec3(const math::Vec3 &v) noexcept {
@@ -208,8 +202,7 @@ float CameraManager::noise1d(float t) noexcept {
   };
   const float v0 = hash(i0);
   const float v1 = hash(i0 + 1U);
-  const float s = frac * frac * (3.0F - 2.0F * frac);
-  return v0 + s * (v1 - v0);
+  return math::lerp(v0, v1, math::smoothstep(0.0F, 1.0F, frac));
 }
 
 /// The projection kind never interpolates — the winning camera's
@@ -264,13 +257,14 @@ void CameraManager::evaluate(float dt, CameraEntry *outCamera) noexcept {
     m_currentOrthoSize = best->orthographicSize;
     m_hasEvaluated = true;
   } else {
-    m_currentPosition = lerp_vec3(m_currentPosition, best->position, t);
-    m_currentTarget = lerp_vec3(m_currentTarget, best->target, t);
-    m_currentUp = lerp_vec3(m_currentUp, best->up, t);
-    m_currentFov = lerp(m_currentFov, best->fovRadians, t);
-    m_currentNear = lerp(m_currentNear, best->nearPlane, t);
-    m_currentFar = lerp(m_currentFar, best->farPlane, t);
-    m_currentOrthoSize = lerp(m_currentOrthoSize, best->orthographicSize, t);
+    m_currentPosition = math::lerp(m_currentPosition, best->position, t);
+    m_currentTarget = math::lerp(m_currentTarget, best->target, t);
+    m_currentUp = math::lerp(m_currentUp, best->up, t);
+    m_currentFov = math::lerp(m_currentFov, best->fovRadians, t);
+    m_currentNear = math::lerp(m_currentNear, best->nearPlane, t);
+    m_currentFar = math::lerp(m_currentFar, best->farPlane, t);
+    m_currentOrthoSize =
+        math::lerp(m_currentOrthoSize, best->orthographicSize, t);
   }
   m_currentProjection = best->projection;
 
@@ -285,7 +279,7 @@ void CameraManager::evaluate(float dt, CameraEntry *outCamera) noexcept {
       continue;
     }
     const float progress = shake.elapsed / shake.duration;
-    const float envelope = shake.amplitude * std::exp(-shake.decay * progress);
+    const float envelope = shake.amplitude * math::det_exp(-shake.decay * progress);
     const float phase = shake.elapsed * shake.frequency;
     shakeOffset.x += envelope * noise1d(phase);
     shakeOffset.y += envelope * noise1d(phase + 100.0F);

@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "engine/core/logging.h"
+#include "engine/math/interpolation.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics_query.h"
@@ -87,10 +88,10 @@ void update_spring_arm_cameras(World &world, float dt) noexcept {
       }
     }
 
-    const float speed = arm.lagSpeed * dt;
-    const float blend = (speed < 1.0F) ? speed : 1.0F;
-    float nextLength =
-        armPtr->currentLength + (desiredLen - armPtr->currentLength) * blend;
+    // An exponential approach, so the arm closes the same share of the gap
+    // per second whatever the fixed step is.
+    float nextLength = math::exp_decay(armPtr->currentLength, desiredLen,
+                                       arm.lagSpeed, dt);
     if (clipped && (desiredLen < nextLength)) {
       nextLength = desiredLen;
     }

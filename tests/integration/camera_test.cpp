@@ -623,6 +623,48 @@ bool test_spring_arm_uses_parent_composed_transform() noexcept {
          nearly(active->position.y, 2.0F) && nearly(active->position.z, 4.0F);
 }
 
+/// The arm's lag closes the same share of the gap per second whatever the
+/// step: one 0.2 s update and two of 0.1 s leave it equally long. Before
+/// the lag moved to math::exp_decay it blended by lagSpeed * dt, which
+/// gave 2.6 m after the long step and 2.44 m after the two short ones.
+bool test_spring_arm_lag_is_step_size_independent() noexcept {
+  float lengths[2] = {0.0F, 0.0F};
+  for (int split = 0; split < 2; ++split) {
+    std::unique_ptr<World> world(new (std::nothrow) World());
+    const Entity owner =
+        (world != nullptr) ? world->create_scene_object() : kInvalidEntity;
+    if (owner == kInvalidEntity) {
+      return false;
+    }
+    SpringArmComponent arm{};
+    arm.armLength = 5.0F;
+    arm.currentLength = 1.0F;
+    arm.lagSpeed = 2.0F;
+    arm.collisionEnabled = false;
+    if (!give_camera(*world, owner) || !world->add_spring_arm(owner, arm)) {
+      return false;
+    }
+    world->begin_transform_phase();
+    world->end_frame_phase();
+    if (split == 0) {
+      update_spring_arm_cameras(*world, 0.2F);
+    } else {
+      update_spring_arm_cameras(*world, 0.1F);
+      update_spring_arm_cameras(*world, 0.1F);
+    }
+    SpringArmComponent after{};
+    if (!world->get_spring_arm(owner, &after)) {
+      return false;
+    }
+    lengths[split] = after.currentLength;
+  }
+  // 1 + 4 (1 - e^-0.4) = 2.3187 m. det_exp is within a few ulp of e^x, and
+  // the two-step path rounds twice more: 1e-5 m is tens of ulp of 4 m.
+  constexpr float kExpected = 2.31871999F;
+  return (std::fabs(lengths[0] - kExpected) <= 1.0e-5F) &&
+         (std::fabs(lengths[1] - lengths[0]) <= 1.0e-5F);
+}
+
 /// Collision sweep: a wall between pivot and camera clamps the arm to the
 /// hit distance while the owner's own collider is skipped; disabling
 /// collision keeps the authored length.
@@ -1333,6 +1375,8 @@ int main() {
       test_spring_arm_uses_parent_composed_transform);
   run("test_spring_arm_collision_clamps_length",
       test_spring_arm_collision_clamps_length);
+  run("test_spring_arm_lag_is_step_size_independent",
+      test_spring_arm_lag_is_step_size_independent);
   run("test_destroyed_owner_removes_camera",
       test_destroyed_owner_removes_camera);
   run("test_camera_component_crud", test_camera_component_crud);
