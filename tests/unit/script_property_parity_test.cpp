@@ -1,7 +1,7 @@
 // Verifies that the editor's static scan of script properties and the Lua
 // VM agree on every script the engine ships (#134): each script under the
-// sample project and the new-project template is scanned and also run in a
-// plain Lua 5.4 VM, with `engine` stubbed so top-level code finds the
+// source tree's sample project and new-project template is scanned and
+// also run in a plain Lua 5.4 VM, with `engine` stubbed so top-level code finds the
 // functions it names. For every script the scan reads no diagnostic, finds
 // exactly the properties the module's `properties` table holds, and gives
 // each the type and default the VM evaluates. The samples declare
@@ -144,9 +144,17 @@ std::size_t check_script(const fs::path &path) {
 
 /// Runs the scan/VM parity suite.
 int main() {
-  const std::string project = engine::tests::sample_project_path();
-  const std::string engineRoot = engine::tests::engine_root_path();
-  if (project.empty() || engineRoot.empty()) {
+  // The source tree, not the build's copy found from the working
+  // directory: suites running alongside this one write scripts of their
+  // own into that copy (#1122's determinism script, which a plain VM
+  // cannot run, was read as a shipped one).
+  const fs::path source(ENGINE_TEST_SOURCE_DIR);
+  const std::string project =
+      (source / engine::tests::kSampleProjectDirectory).string();
+  const std::string engineRoot = (source / "engine_assets").string();
+  std::error_code found{};
+  if (!fs::is_directory(project, found) ||
+      !fs::is_directory(engineRoot, found)) {
     g_tests.fail("the sample project and the engine content are found");
     return g_tests.finish("script property parity");
   }

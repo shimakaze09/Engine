@@ -621,6 +621,11 @@ engine_add_test_executable(engine_unit_script_property_parity
     engine_scripting
     # Runs each script in a plain VM, the side of the parity it checks.
     engine_lua
+    COMPILE_DEFINITIONS
+    # The shipped scripts are the source tree's: the build's copy of the
+    # sample project is the working directory other suites write their
+    # own scripts into while this one runs.
+    ENGINE_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 engine_add_test_executable(engine_unit_lua_error_diagnostic
