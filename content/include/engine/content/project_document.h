@@ -113,6 +113,31 @@ struct ProjectSaveSettings final {
   std::uint32_t maxSlotMiB = 0U;
 };
 
+/// An engine version, MAJOR.MINOR.PATCH, as engine_version.h numbers the
+/// running build. A project document carries the one that last wrote it,
+/// as Unreal's .uproject carries EngineAssociation and Unity's
+/// ProjectVersion.txt its editor version, so a loader can tell which
+/// engine a project is for before it reads anything else.
+struct ProjectEngineVersion final {
+  /// False for a document written before the stamp existed.
+  bool set = false;
+  std::uint32_t majorVersion = 0U;
+  std::uint32_t minorVersion = 0U;
+  std::uint32_t patchVersion = 0U;
+};
+
+/// The running engine's version.
+ProjectEngineVersion running_engine_version() noexcept;
+
+/// Parses "MAJOR.MINOR.PATCH": three runs of decimal digits, each fitting
+/// 32 bits, and nothing else. False, with `*out` untouched, otherwise.
+bool parse_engine_version(const char *text, ProjectEngineVersion *out) noexcept;
+
+/// Negative, zero or positive as `a` is older than, the same as or newer
+/// than `b`, part by part.
+int compare_engine_versions(const ProjectEngineVersion &a,
+                            const ProjectEngineVersion &b) noexcept;
+
 /// Physics collision layers: the 32 bits of Collider::collisionLayer and
 /// collisionMask, as Godot's and Unity's are.
 inline constexpr std::size_t kMaxCollisionLayers = 32U;
@@ -172,6 +197,11 @@ struct ProjectDocument final {
   /// The project's persistent identity. Survives a rename or a move of the
   /// directory; per-project data (saves, rebound input) is keyed by it.
   AssetGuid guid{};
+  /// The engine version that last wrote the document ("identity.engine"),
+  /// unset for one written before the stamp existed. The writer always
+  /// stamps the running engine's version, so a project saved by a newer
+  /// engine says so.
+  ProjectEngineVersion engine{};
   /// Content root, relative to the project directory, mounted at
   /// kProjectContentMount.
   char contentRoot[kProjectRootCapacity] = {};

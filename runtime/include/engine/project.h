@@ -70,6 +70,10 @@ enum class ProjectOpenFailureKind : std::uint8_t {
   PackageMissing,
   /// A resolved path does not fit kProjectOsPathCapacity.
   PathTooLong,
+  /// The document was last written by a newer engine than this one, so it
+  /// may hold what this build cannot read, as Unreal refuses a project
+  /// from a newer engine.
+  NewerEngine,
 };
 
 struct ProjectOpenFailure final {
