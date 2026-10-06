@@ -66,6 +66,12 @@ const char *g_firstRenderName = "after-boot";
 
 /// Whether the fixture's swapchain reset takes effect on the second frame.
 bool g_resetOnSecondFrame = true;
+/// Experiment (#1223): the fixture's first frame already draws a lit,
+/// shadowed scene, so the frame the suite reads is not the first to use
+/// any scene resource.
+bool g_warmFirstFrame = false;
+Entity g_warmSun = kInvalidEntity;
+Entity g_warmCube = kInvalidEntity;
 
 /// Mean brightness of the (2r+1)^2 block centred on (cx, cy).
 double block_level(const CapturedFrame &frame, int cx, int cy, int r) noexcept {
@@ -122,6 +128,25 @@ struct Readings final {
   Faces late;       ///< Twelve frames after caching.
   Faces rerendered; ///< The cascades rendered every frame.
 };
+
+/// The warm first-frame scene: the camera the suite uses, a sun and a
+/// cube behind the camera, so frame one renders every scene pass and the
+/// cascades without putting anything in the suite's view.
+bool build_warm_scene(World &world) noexcept {
+  if (!engine::tests::look_from(world, engine::math::Vec3(0.0F, 0.0F, 0.0F),
+                                engine::math::Vec3(0.0F, 0.0F, -1.0F))) {
+    return false;
+  }
+  g_warmSun = world.create_scene_object();
+  engine::runtime::LightComponent sun = sun_of_cycle(0);
+  sun.intensity = 1.0F;
+  // Off the sun's axis through the two faces, and gone before the
+  // suite's own scene, so nothing it casts reaches them.
+  g_warmCube = add_cube(world, engine::math::Vec3(20.0F, 0.0F, 10.0F));
+  return (g_warmCube != kInvalidEntity) &&
+         (g_warmSun != kInvalidEntity) &&
+         world.add_light_component(g_warmSun, sun);
+}
 
 /// Captures the next frame and reads both faces from it; `what` names the
 /// capture file. False when the device returned no frame.
@@ -201,8 +226,14 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   // render, so the view draws on each of them: a view with no camera draws
   // nothing, and the frame a camera first appears on is drawn without it.
   // With nothing to cast, those frames render no cascades.
-  if (!engine::tests::look_from(world, engine::math::Vec3(0.0F, 0.0F, 0.0F),
-                                engine::math::Vec3(0.0F, 0.0F, -1.0F))) {
+  if (g_warmFirstFrame) {
+    if (!world.remove_light_component(g_warmSun) ||
+        !world.destroy_entity(g_warmCube)) {
+      return 10;
+    }
+  } else if (!engine::tests::look_from(world,
+                                       engine::math::Vec3(0.0F, 0.0F, 0.0F),
+                                       engine::math::Vec3(0.0F, 0.0F, -1.0F))) {
     return 10;
   }
   if (!reach_first_render_frame(pipeline)) {
@@ -300,8 +331,11 @@ int main(int argc, char **argv) {
       const char *name;
       FirstRender frame;
       bool resetOnSecondFrame = true;
+      bool warm = false;
     } kFrames[] = {{"after-boot", FirstRender::AfterBoot},
                    {"after-boot-unchanged", FirstRender::AfterBoot, false},
+                   {"after-boot-unchanged-warm", FirstRender::AfterBoot, false,
+                    true},
                    {"third-frame", FirstRender::ThirdFrame},
                    {"settled", FirstRender::Settled},
                    {"after-vsync-on", FirstRender::AfterVsyncOn},
@@ -312,6 +346,7 @@ int main(int argc, char **argv) {
         g_firstRender = frame.frame;
         g_firstRenderName = frame.name;
         g_resetOnSecondFrame = frame.resetOnSecondFrame;
+        g_warmFirstFrame = frame.warm;
         known = true;
       }
     }
@@ -320,6 +355,7 @@ int main(int argc, char **argv) {
       return 8;
     }
   }
-  return engine::tests::run_gpu_scene_test("shadow_cache_far_cascade_gpu_test",
-                                           &run, nullptr, g_resetOnSecondFrame);
+  return engine::tests::run_gpu_scene_test(
+      "shadow_cache_far_cascade_gpu_test", &run,
+      g_warmFirstFrame ? &build_warm_scene : nullptr, g_resetOnSecondFrame);
 }

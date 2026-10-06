@@ -288,6 +288,31 @@ set_property(TEST
     engine_integration_shadow_cache_far_cascade_gpu_after_boot_unchanged
     PROPERTY ENVIRONMENT
     "ENGINE_CVAR_r_fog_mode=off;ENGINE_CVAR_r_bloom=0;ENGINE_CVAR_r_ssao=0;ENGINE_CVAR_r_fxaa=0")
+# Experiment (#1223): repeated runs of the failing entry, the same with a
+# warm first frame, and the same with bgfx's D3D12 debug layer.
+foreach(_rep IN ITEMS 1 2 3 4)
+    foreach(_variant IN ITEMS after-boot-unchanged after-boot-unchanged-warm)
+        string(REPLACE "-" "_" _variant_suffix "${_variant}")
+        set(_exp_test exp1223_${_variant_suffix}_${_rep})
+        add_test(NAME ${_exp_test}
+            COMMAND engine_integration_shadow_cache_far_cascade_gpu ${_variant})
+        set_tests_properties(${_exp_test} PROPERTIES
+            LABELS "gpu;integration"
+            SKIP_REGULAR_EXPRESSION "SKIPPED:"
+            ENVIRONMENT
+            "ENGINE_CVAR_r_fog_mode=off;ENGINE_CVAR_r_bloom=0;ENGINE_CVAR_r_ssao=0;ENGINE_CVAR_r_fxaa=0")
+    endforeach()
+endforeach()
+foreach(_rep IN ITEMS 1 2)
+    set(_exp_test exp1223_after_boot_unchanged_debug_${_rep})
+    add_test(NAME ${_exp_test}
+        COMMAND engine_integration_shadow_cache_far_cascade_gpu after-boot-unchanged)
+    set_tests_properties(${_exp_test} PROPERTIES
+        LABELS "gpu;integration"
+        SKIP_REGULAR_EXPRESSION "SKIPPED:"
+        ENVIRONMENT
+        "ENGINE_CVAR_r_fog_mode=off;ENGINE_CVAR_r_bloom=0;ENGINE_CVAR_r_ssao=0;ENGINE_CVAR_r_fxaa=0;ENGINE_CVAR_r_bgfx_debug=1;ENGINE_CVAR_r_bgfx_trace=1")
+endforeach()
 
 engine_add_test_executable(engine_integration_srgb_texture_gpu
     SOURCES
