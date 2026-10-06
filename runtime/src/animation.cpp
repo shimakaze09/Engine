@@ -114,19 +114,6 @@ math::Vec3 sample_vec3(const AnimationClip &clip, const AnimTrackDesc &track,
   return math::add(a, math::mul(math::sub(b, a), cursor.fraction));
 }
 
-/// Shortest-path normalized lerp between two rotations.
-math::Quat nlerp_shortest(const math::Quat &a, math::Quat b,
-                          float t) noexcept {
-  const float dot =
-      (a.x * b.x) + (a.y * b.y) + (a.z * b.z) + (a.w * b.w);
-  if (dot < 0.0F) {
-    b = math::Quat{-b.x, -b.y, -b.z, -b.w};
-  }
-  const math::Quat mixed{a.x + ((b.x - a.x) * t), a.y + ((b.y - a.y) * t),
-                         a.z + ((b.z - a.z) * t), a.w + ((b.w - a.w) * t)};
-  return math::normalize(mixed);
-}
-
 /// Samples a rotation track at the cursor.
 math::Quat sample_quat(const AnimationClip &clip, const AnimTrackDesc &track,
                        const KeyCursor &cursor, float dt) noexcept {
@@ -163,7 +150,7 @@ math::Quat sample_quat(const AnimationClip &clip, const AnimTrackDesc &track,
     return math::normalize(result);
   }
 
-  return nlerp_shortest(value_at(cursor.index), value_at(cursor.index + 1U),
+  return math::nlerp(value_at(cursor.index), value_at(cursor.index + 1U),
                         cursor.fraction);
 }
 
@@ -244,7 +231,7 @@ void blend_poses(const JointPose *a, const JointPose *b, std::size_t count,
         math::mul(math::sub(b[i].translation, a[i].translation), t));
     out[i].scale = math::add(
         a[i].scale, math::mul(math::sub(b[i].scale, a[i].scale), t));
-    out[i].rotation = nlerp_shortest(a[i].rotation, b[i].rotation, t);
+    out[i].rotation = math::nlerp(a[i].rotation, b[i].rotation, t);
   }
 }
 

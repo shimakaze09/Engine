@@ -69,17 +69,15 @@ static JointId allocate_joint(PhysicsWorldView &world,
 /// non-unit quaternions and rotate_vector requires unit length.
 static math::Vec3 to_body_local(const Transform &transform,
                                 const math::Vec3 &worldOffset) noexcept {
-  return math::rotate_vector(
-      worldOffset, math::conjugate(math::normalize(transform.rotation)));
+  return math::rotate_inverse(worldOffset, math::normalize(transform.rotation));
 }
 
 /// Creation-time relative orientation of B in A's frame (qA^-1 qB), unit
 /// length regardless of the input quaternions' scale.
 static math::Quat relative_rotation(const Transform &transformA,
                                     const Transform &transformB) noexcept {
-  return math::normalize(
-      math::mul(math::conjugate(math::normalize(transformA.rotation)),
-                math::normalize(transformB.rotation)));
+  return math::normalize(math::relative(math::normalize(transformA.rotation),
+                                        math::normalize(transformB.rotation)));
 }
 
 /// Any unit vector perpendicular to a unit axis, from its least-aligned

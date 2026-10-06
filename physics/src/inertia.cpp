@@ -90,9 +90,9 @@ void shape_unit_inertia(const math::Collider &collider, math::Vec3 *outInertia,
 math::Vec3 rotate_diagonal(const math::Vec3 &inertia,
                            const math::Quat &rotation) noexcept {
   const math::Quat q = math::normalize(rotation);
-  const math::Vec3 ex = math::rotate_vector(math::Vec3(1.0F, 0.0F, 0.0F), q);
-  const math::Vec3 ey = math::rotate_vector(math::Vec3(0.0F, 1.0F, 0.0F), q);
-  const math::Vec3 ez = math::rotate_vector(math::Vec3(0.0F, 0.0F, 1.0F), q);
+  const math::Vec3 ex = math::right(q);
+  const math::Vec3 ey = math::up(q);
+  const math::Vec3 ez = math::back(q);
   return math::Vec3(
       (ex.x * ex.x * inertia.x) + (ey.x * ey.x * inertia.y) +
           (ez.x * ez.x * inertia.z),
@@ -176,7 +176,7 @@ math::Vec3 inverse_inertia_for_collider(const math::Collider &collider,
 math::Vec3 apply_inverse_inertia(const math::Vec3 &inverseInertia,
                                  const math::Quat &rotation,
                                  const math::Vec3 &v) noexcept {
-  const math::Vec3 local = math::rotate_vector(v, math::conjugate(rotation));
+  const math::Vec3 local = math::rotate_inverse(v, rotation);
   const math::Vec3 scaled(local.x * inverseInertia.x,
                           local.y * inverseInertia.y,
                           local.z * inverseInertia.z);
@@ -200,9 +200,7 @@ void inverse_inertia_world(const math::Vec3 &inverseInertia,
   // Columns of R are the rotated body axes; R diag R^T sums the outer
   // products of those columns weighted by the axis inverse inertia.
   const math::Vec3 axes[3] = {
-      math::rotate_vector(math::Vec3(1.0F, 0.0F, 0.0F), rotation),
-      math::rotate_vector(math::Vec3(0.0F, 1.0F, 0.0F), rotation),
-      math::rotate_vector(math::Vec3(0.0F, 0.0F, 1.0F), rotation)};
+      math::right(rotation), math::up(rotation), math::back(rotation)};
   const float weights[3] = {inverseInertia.x, inverseInertia.y,
                             inverseInertia.z};
   for (int row = 0; row < 3; ++row) {

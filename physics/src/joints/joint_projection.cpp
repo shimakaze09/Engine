@@ -166,14 +166,9 @@ math::Vec3 joint_world_lever(const Transform &transform,
 
 void apply_orientation_delta(Transform &transform,
                              const math::Vec3 &rotVec) noexcept {
-  const float angleSq = math::length_sq(rotVec);
-  if (angleSq <= kJointEpsilon * kJointEpsilon) {
-    return;
-  }
-  const float angle = std::sqrt(angleSq);
-  const math::Vec3 axis = math::div(rotVec, angle);
-  transform.rotation = math::normalize(
-      math::mul(math::from_axis_angle(axis, angle), transform.rotation));
+  // A rotation vector is an angular velocity over one second; below
+  // kJointEpsilon radians integrate leaves the rotation untouched.
+  transform.rotation = math::integrate(transform.rotation, rotVec, 1.0F);
 }
 
 float project_point_position(JointSolveContext &ctx, const math::Vec3 &leverA,
@@ -341,19 +336,8 @@ math::Vec3 relative_orientation_correction(
     const math::Quat &reference) noexcept {
   const math::Quat target =
       math::mul(math::normalize(transformA.rotation), reference);
-  math::Quat correction = math::mul(
-      target, math::conjugate(math::normalize(transformB.rotation)));
-  if (correction.w < 0.0F) {
-    correction = math::Quat(-correction.x, -correction.y, -correction.z,
-                            -correction.w);
-  }
-
-  math::Vec3 axis{};
-  float angle = 0.0F;
-  if (!math::to_axis_angle(correction, &axis, &angle)) {
-    return math::Vec3(0.0F, 0.0F, 0.0F);
-  }
-  return math::mul(axis, angle);
+  return math::to_rotation_vector(math::mul(
+      target, math::conjugate(math::normalize(transformB.rotation))));
 }
 
 } // namespace engine::physics

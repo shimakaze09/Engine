@@ -231,6 +231,24 @@ RULES: tuple[Rule, ...] = (
         "inspector_linear_color3",
     ),
     Rule(
+        name="rotation by the inverse",
+        owner="math/include/engine/math/quat.h",
+        # Rotating by a conjugate is a hand-written inverse rotation:
+        # physics carried three before rotate_inverse and relative existed.
+        pattern=r"rotate_vector\([^;]*conjugate\(",
+        remedy="call engine::math::rotate_inverse() or relative()",
+    ),
+    Rule(
+        name="the rotation axis accessors",
+        owner="math/include/engine/math/quat.h",
+        # Rotating a constant basis vector is reading an axis of the
+        # rotation: the camera, the capture and inertia each spelled
+        # forward, up or right that way.
+        pattern=r"rotate_vector\(\s*(?:math::)?Vec3\(\s*-?[01]\.0F,\s*"
+        r"-?[01]\.0F,\s*-?[01]\.0F\s*\)",
+        remedy="call engine::math::forward(), back(), right() or up()",
+    ),
+    Rule(
         name="the exponential smoothing factor",
         owner="math/include/engine/math/interpolation.h",
         # One minus e to a negative power is what a hand-written

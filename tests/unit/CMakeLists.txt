@@ -169,6 +169,13 @@ engine_add_test_executable(engine_unit_math_interpolation
     engine_math
 )
 
+engine_add_test_executable(engine_unit_math_quat_ops
+    SOURCES
+    math_quat_ops_test.cpp
+    PRIVATE_DEPS
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_math_frustum
     SOURCES
     math_frustum_test.cpp
