@@ -29,9 +29,6 @@ bool draw_sky_light_component_fields(runtime::SkyLightComponent &skyLight,
 /// (color/direction/intensity); returns true if the type changed.
 bool draw_light_type_combo(runtime::LightComponent &light) noexcept;
 
-/// Draws ScriptComponent's script-path field as a searchable path picker.
-bool draw_script_component_fields(runtime::ScriptComponent &script) noexcept;
-
 /// Draws AnimationComponent's controller-path picker plus playback fields.
 bool draw_animation_component_fields(
     runtime::AnimationComponent &animation) noexcept;

@@ -159,11 +159,6 @@ bool draw_light_type_combo(runtime::LightComponent &light) noexcept {
   return false;
 }
 
-bool draw_script_component_fields(runtime::ScriptComponent &script) noexcept {
-  return draw_path_reference_picker("Script Path", script.scriptPath,
-                                    sizeof(script.scriptPath), ".lua");
-}
-
 bool draw_animation_component_fields(
     runtime::AnimationComponent &animation) noexcept {
   bool modified = draw_path_reference_picker(

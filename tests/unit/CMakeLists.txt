@@ -929,6 +929,13 @@ engine_add_test_executable(engine_unit_world_script_properties
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_world_script_behaviours
+    SOURCES
+    world_script_behaviours_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_vfs
     SOURCES
     vfs_test.cpp

@@ -150,7 +150,7 @@ bool write_collision_scene() noexcept {
   engine::runtime::RigidBody body{};
   body.inverseMass = 1.0F;
   engine::runtime::ScriptComponent script{};
-  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+  std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s",
                 kCollisionScriptPath);
   return author->add_collider(block, blockCollider) &&
          author->add_collider(sphere, sphereCollider) &&
@@ -254,7 +254,7 @@ int main() {
       const engine::runtime::Entity scripted = g_world->create_scene_object();
       CHECK(scripted != engine::runtime::kInvalidEntity, "spawn scripted");
       engine::runtime::ScriptComponent sc{};
-      std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kScriptPath);
+      std::snprintf(sc.behaviours[0].scriptPath, sizeof(sc.behaviours[0].scriptPath), "%s", kScriptPath);
       CHECK(g_world->add_script_component(scripted, sc), "attach script");
       CHECK(ticking_frame(pipeline), "script frame 1");
       CHECK(ticking_frame(pipeline), "script frame 2");

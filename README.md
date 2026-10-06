@@ -413,6 +413,32 @@ the last scene load, or one naming a destroyed entity. The first such
 call from each script line logs a Warning naming the file, the line, the
 binding and the reason (`engine_integration_lua_entity_argument_report`).
 
+An entity runs up to eight behaviours, each a script, as a Unity
+GameObject carries several MonoBehaviours. The Script section in the
+Inspector lists them. Each one has an Enabled box, its script path, Up,
+Down and Remove buttons, and its property fields, and Add Behaviour
+appends another. Add, remove and reorder are each one undo step that keeps
+every property value with its script
+(`engine_unit_editor_script_properties`).
+
+- **Lifecycle.** Each behaviour begins, ticks and ends on its own, in list
+  order (`engine_integration_script_behaviours`).
+  - A disabled behaviour is neither begun nor ticked.
+  - One enabled after its entity began play begins before its first tick.
+  - One whose hook raises an error stops alone until its script reloads,
+    and the entity's other behaviours run on.
+  - `on_end_play` reaches every behaviour that began, a since-disabled one
+    included, and none that never began.
+- **Storage.** One enabled behaviour is saved as the bare script path the
+  format has always used, so existing scenes and prefabs are unchanged.
+  Any other list is an array, with a disabled entry written as
+  `{"scriptPath": ..., "enabled": false}`
+  (`engine_unit_world_script_behaviours`).
+- **Limits.** One entity runs a script at most once. A World holds 8,192
+  scripted entities, and one more is refused with a logged reason.
+  `engine.add_script_component(entity, path)` still gives the entity
+  exactly that one behaviour.
+
 A script's tunables are properties: values each entity using the script
 sets in the Inspector instead of in the script's source, as Unity shows a
 MonoBehaviour's public fields. The script declares them in one literal
@@ -455,6 +481,9 @@ end
     never dropped (`engine_unit_world_script_properties`).
 - **Reading in Lua.** `engine.get_property` keeps Lua's integer or float
   subtype (`engine_integration_lua_script_properties`).
+  - Inside a behaviour's own hook it reads that behaviour's value, so two
+    behaviours may declare the same name. Read for another entity, a name
+    resolves to the first of its behaviours that declares it.
   - A stored value whose type the script has since changed reads the
     default.
   - An undeclared name reads `nil`.
@@ -491,7 +520,8 @@ Current script conventions in the sample's `assets/`:
 	  editor Stop, `on_end_play` runs before the authored scene is
 	  restored, so it reads the state the session ended in
 	- Legacy `on_start`/`on_update`/`on_end` names remain as fallbacks
-	- Every hook visits the scripted entities in one order, ascending
+	- Every hook visits the scripted entities in one order, each entity's
+	  behaviours in list order, and the entities by ascending
 	  entity index: the scene file's own entity order, which a save and a
 	  load keep, with entities spawned during play in the slot they take.
 	  Removing and re-adding a script does not move its entity. Editor

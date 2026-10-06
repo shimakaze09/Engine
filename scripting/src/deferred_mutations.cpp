@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 
 namespace engine::scripting {
@@ -51,7 +52,9 @@ struct DeferredMutation final {
   runtime::MeshComponent meshComponent{};
   runtime::NameComponent nameComponent{};
   runtime::LightComponent lightComponent{};
-  runtime::ScriptComponent scriptComponent{};
+  // The one script add_script_component sets; a whole behaviour list would
+  // grow every queued record by a kilobyte.
+  char scriptPath[math::ScriptBehaviour::kMaxPathLength + 1U] = {};
   runtime::PointLightComponent pointLightComponent{};
   runtime::SpotLightComponent spotLightComponent{};
   math::SpringArmComponent springArm{};
@@ -612,24 +615,38 @@ bool apply_or_queue_remove_light_component(runtime::Entity entity) noexcept {
   return queue_deferred_mutation(mutation);
 }
 
+namespace {
+
+/// The behaviour list holding only `scriptPath`, enabled.
+runtime::ScriptComponent single_script_component(
+    const char *scriptPath) noexcept {
+  runtime::ScriptComponent component{};
+  std::snprintf(component.behaviours[0].scriptPath,
+                sizeof(component.behaviours[0].scriptPath), "%s", scriptPath);
+  return component;
+}
+
+} // namespace
+
 /// Applies or queues a script component update based on the current World phase.
-bool apply_or_queue_script_component(
-    runtime::Entity entity,
-    const runtime::ScriptComponent &component) noexcept {
+bool apply_or_queue_script_component(runtime::Entity entity,
+                                     const char *scriptPath) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
-  if ((binding.world == nullptr) || (binding.services == nullptr)) {
+  if ((binding.world == nullptr) || (binding.services == nullptr) ||
+      (scriptPath == nullptr) ||
+      (std::strlen(scriptPath) > math::ScriptBehaviour::kMaxPathLength)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return binding.services->add_script_component_op(binding.world,
-                                                     entity, component);
+    return binding.services->add_script_component_op(
+        binding.world, entity, single_script_component(scriptPath));
   }
 
   DeferredMutation mutation{};
   mutation.type = DeferredMutationType::AddScriptComponent;
   mutation.entity = entity;
-  mutation.scriptComponent = component;
+  std::memcpy(mutation.scriptPath, scriptPath, std::strlen(scriptPath));
   return queue_deferred_mutation(mutation);
 }
 
@@ -955,9 +972,9 @@ std::size_t flush_deferred_mutations_prefix(std::size_t limit) noexcept {
                                                        mutation.entity));
       break;
     case DeferredMutationType::AddScriptComponent:
-      note(binding.services->add_script_component_op(binding.world,
-                                                     mutation.entity,
-                                                     mutation.scriptComponent));
+      note(binding.services->add_script_component_op(
+          binding.world, mutation.entity,
+          single_script_component(mutation.scriptPath)));
       break;
     case DeferredMutationType::RemoveScriptComponent:
       note(binding.services->remove_script_component_op(

@@ -1133,7 +1133,7 @@ int main() {
     }
     engine::runtime::ScriptComponent clonedScript{};
     if (!world->get_script_component(cloneEntity, &clonedScript) ||
-        (std::strcmp(clonedScript.scriptPath, "scripts/cloned.lua") != 0)) {
+        (std::strcmp(clonedScript.behaviours[0].scriptPath, "scripts/cloned.lua") != 0)) {
       engine::scripting::shutdown_scripting();
       remove_script_file();
       return 252;
@@ -1304,7 +1304,7 @@ int main() {
     }
 
     engine::runtime::ScriptComponent sc{};
-    std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kTempScriptPath);
+    std::snprintf(sc.behaviours[0].scriptPath, sizeof(sc.behaviours[0].scriptPath), "%s", kTempScriptPath);
     if (!world->add_script_component(scripted, sc)) {
       engine::scripting::shutdown_scripting();
       remove_script_file();
@@ -1407,7 +1407,7 @@ int main() {
       return 78;
     }
     engine::runtime::ScriptComponent sc{};
-    std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kTempScriptPath);
+    std::snprintf(sc.behaviours[0].scriptPath, sizeof(sc.behaviours[0].scriptPath), "%s", kTempScriptPath);
     if (!world->add_script_component(scripted, sc)) {
       engine::scripting::shutdown_scripting();
       remove_script_file();

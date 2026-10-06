@@ -156,7 +156,7 @@ bool verify_entity_module_hot_reload(engine::runtime::World *world) noexcept {
     return false;
   }
   engine::runtime::ScriptComponent oldScript{};
-  std::snprintf(oldScript.scriptPath, sizeof(oldScript.scriptPath), "%s",
+  std::snprintf(oldScript.behaviours[0].scriptPath, sizeof(oldScript.behaviours[0].scriptPath), "%s",
                 kTempScriptPath);
   if (!world->add_script_component(oldEntity, oldScript)) {
     return false;
@@ -211,7 +211,7 @@ bool verify_entity_module_hot_reload(engine::runtime::World *world) noexcept {
     return false;
   }
   engine::runtime::ScriptComponent recycledScript{};
-  std::snprintf(recycledScript.scriptPath, sizeof(recycledScript.scriptPath),
+  std::snprintf(recycledScript.behaviours[0].scriptPath, sizeof(recycledScript.behaviours[0].scriptPath),
                 "%s", kTempScriptPath);
   if (!world->add_script_component(recycledEntity, recycledScript)) {
     return false;
@@ -1256,7 +1256,7 @@ int main() {
     static_cast<void>(world->add_transform(entity, t));
 
     engine::runtime::ScriptComponent sc{};
-    std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kTempScriptPath);
+    std::snprintf(sc.behaviours[0].scriptPath, sizeof(sc.behaviours[0].scriptPath), "%s", kTempScriptPath);
     static_cast<void>(world->add_script_component(entity, sc));
 
     // Dispatch begin_play.

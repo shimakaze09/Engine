@@ -930,22 +930,143 @@ bool read_tag_set_component(const core::JsonParser &parser,
   return true;
 }
 
-void write_script_properties_component(
-    core::JsonWriter &writer, const char *key,
-    const ScriptPropertiesComponent &component) noexcept {
-  // An empty set writes nothing: an entity whose overrides were all reset
-  // saves exactly as one that never had any.
-  if (component.count == 0U) {
+void write_script_component(core::JsonWriter &writer, const char *key,
+                            const ScriptComponent &component) noexcept {
+  const std::size_t count = script_behaviour_count(component);
+  if (count == 0U) {
     return;
   }
-  writer.write_key(key);
-  writer.begin_object();
+  if ((count == 1U) && component.behaviours[0].enabled) {
+    writer.write_string(key, component.behaviours[0].scriptPath);
+    return;
+  }
+  writer.begin_array(key);
+  for (std::size_t i = 0U; i < count; ++i) {
+    const ScriptBehaviour &behaviour = component.behaviours[i];
+    if (behaviour.enabled) {
+      writer.write_string_value(behaviour.scriptPath);
+      continue;
+    }
+    writer.begin_object();
+    writer.write_string("scriptPath", behaviour.scriptPath);
+    writer.write_bool("enabled", false);
+    writer.end_object();
+  }
+  writer.end_array();
+}
+
+namespace {
+
+/// Reads one behaviour entry -- a path string, or an object with a
+/// required "scriptPath" and an optional "enabled" -- into `out`. The path
+/// must be non-empty and fit whole.
+bool read_script_behaviour(const core::JsonParser &parser,
+                           const core::JsonValue &value,
+                           ScriptBehaviour *out) noexcept {
+  ScriptBehaviour behaviour{};
+  if (value.type == core::JsonValue::Type::String) {
+    if (!parser.copy_string_strict(value, behaviour.scriptPath,
+                                   sizeof(behaviour.scriptPath))) {
+      return false;
+    }
+  } else if (value.type == core::JsonValue::Type::Object) {
+    const std::size_t members = parser.object_size(value);
+    bool gotPath = false;
+    for (std::size_t i = 0U; i < members; ++i) {
+      core::JsonValue key{};
+      core::JsonValue member{};
+      char name[16] = {};
+      if (!parser.get_object_member(value, i, &key, &member) ||
+          !parser.copy_string_strict(key, name, sizeof(name))) {
+        return false;
+      }
+      if ((std::strcmp(name, "scriptPath") == 0) && !gotPath &&
+          (member.type == core::JsonValue::Type::String) &&
+          parser.copy_string_strict(member, behaviour.scriptPath,
+                                    sizeof(behaviour.scriptPath))) {
+        gotPath = true;
+      } else if ((std::strcmp(name, "enabled") != 0) ||
+                 (member.type != core::JsonValue::Type::Bool) ||
+                 !parser.as_bool(member, &behaviour.enabled)) {
+        return false;
+      }
+    }
+    if (!gotPath) {
+      return false;
+    }
+    // Walked by position to refuse other keys; a lookup by name is what
+    // records a member as read for the unread-key report.
+    core::JsonValue lookedUp{};
+    static_cast<void>(parser.get_object_field(value, "scriptPath", &lookedUp));
+    static_cast<void>(parser.get_object_field(value, "enabled", &lookedUp));
+  } else {
+    return false;
+  }
+  if (behaviour.scriptPath[0] == '\0') {
+    return false;
+  }
+  *out = behaviour;
+  return true;
+}
+
+} // namespace
+
+bool read_script_component(const core::JsonParser &parser,
+                           const core::JsonValue &value, bool allowPathObject,
+                           ScriptComponent *outComponent) noexcept {
+  if (outComponent == nullptr) {
+    return false;
+  }
+  ScriptComponent component{};
+  if (value.type == core::JsonValue::Type::String) {
+    // The bare string has always allowed "" for a component with no
+    // script yet; an array entry never does.
+    if (!parser.copy_string_strict(value, component.behaviours[0].scriptPath,
+                                   sizeof(component.behaviours[0].scriptPath))) {
+      return false;
+    }
+  } else if (value.type == core::JsonValue::Type::Array) {
+    const std::size_t count = parser.array_size(value);
+    if ((count == 0U) || (count > kMaxScriptBehaviours)) {
+      return false;
+    }
+    for (std::size_t i = 0U; i < count; ++i) {
+      core::JsonValue element{};
+      if (!parser.get_array_element(value, i, &element) ||
+          !read_script_behaviour(parser, element, &component.behaviours[i])) {
+        return false;
+      }
+    }
+  } else if (allowPathObject && (value.type == core::JsonValue::Type::Object)) {
+    if (!read_script_behaviour(parser, value, &component.behaviours[0])) {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  if (!script_component_is_valid(component)) {
+    return false;
+  }
+  *outComponent = component;
+  return true;
+}
+
+namespace {
+
+/// Writes behaviour `behaviour`'s overrides as the members of the object
+/// the caller opened.
+void write_behaviour_property_members(
+    core::JsonWriter &writer, const ScriptPropertiesComponent &component,
+    std::size_t behaviour) noexcept {
   const std::size_t count =
       (component.count < ScriptPropertiesComponent::kMaxOverrides)
           ? component.count
           : ScriptPropertiesComponent::kMaxOverrides;
   for (std::size_t i = 0U; i < count; ++i) {
     const ScriptPropertiesComponent::Override &entry = component.overrides[i];
+    if (entry.behaviour != behaviour) {
+      continue;
+    }
     switch (entry.value.type) {
     case ScriptPropertyType::Bool:
       writer.write_bool(entry.name, entry.value.boolValue);
@@ -980,28 +1101,27 @@ void write_script_properties_component(
     }
     }
   }
-  writer.end_object();
 }
 
-bool read_script_properties_component(
-    const core::JsonParser &parser, const core::JsonValue &object,
-    ScriptPropertiesComponent *outComponent) noexcept {
-  if ((outComponent == nullptr) ||
-      (object.type != core::JsonValue::Type::Object)) {
+/// Reads one behaviour's override object into `component`.
+bool read_behaviour_property_object(const core::JsonParser &parser,
+                                    const core::JsonValue &object,
+                                    std::size_t behaviour,
+                                    ScriptPropertiesComponent *component) noexcept {
+  if (object.type != core::JsonValue::Type::Object) {
     return false;
   }
   const std::size_t count = parser.object_size(object);
   if (count > ScriptPropertiesComponent::kMaxOverrides) {
     return false;
   }
-  ScriptPropertiesComponent component{};
   for (std::size_t i = 0U; i < count; ++i) {
     core::JsonValue key{};
     core::JsonValue member{};
     char name[kMaxScriptPropertyNameLength + 1U] = {};
     if (!parser.get_object_member(object, i, &key, &member) ||
         !parser.copy_string_strict(key, name, sizeof(name)) ||
-        (script_property_override(component, name) != nullptr)) {
+        (script_property_override(*component, behaviour, name) != nullptr)) {
       return false;
     }
     ScriptPropertyValue value{};
@@ -1035,7 +1155,7 @@ bool read_script_properties_component(
     } else {
       return false;
     }
-    if (!script_properties_set(&component, name, value)) {
+    if (!script_properties_set(component, behaviour, name, value)) {
       return false;
     }
     // Read by position, so look it up by name too: only a lookup records
@@ -1043,6 +1163,71 @@ bool read_script_properties_component(
     // will lose on the next save.
     core::JsonValue lookedUp{};
     static_cast<void>(parser.get_object_field(object, name, &lookedUp));
+  }
+  return true;
+}
+
+} // namespace
+
+void write_script_properties_component(
+    core::JsonWriter &writer, const char *key,
+    const ScriptPropertiesComponent &component) noexcept {
+  // An empty set writes nothing: an entity whose overrides were all reset
+  // saves exactly as one that never had any.
+  if (component.count == 0U) {
+    return;
+  }
+  const std::size_t count =
+      (component.count < ScriptPropertiesComponent::kMaxOverrides)
+          ? component.count
+          : ScriptPropertiesComponent::kMaxOverrides;
+  std::size_t lastBehaviour = 0U;
+  for (std::size_t i = 0U; i < count; ++i) {
+    if (component.overrides[i].behaviour > lastBehaviour) {
+      lastBehaviour = component.overrides[i].behaviour;
+    }
+  }
+  writer.write_key(key);
+  if (lastBehaviour == 0U) {
+    writer.begin_object();
+    write_behaviour_property_members(writer, component, 0U);
+    writer.end_object();
+    return;
+  }
+  writer.begin_array();
+  for (std::size_t behaviour = 0U; behaviour <= lastBehaviour; ++behaviour) {
+    writer.begin_object();
+    write_behaviour_property_members(writer, component, behaviour);
+    writer.end_object();
+  }
+  writer.end_array();
+}
+
+bool read_script_properties_component(
+    const core::JsonParser &parser, const core::JsonValue &value,
+    ScriptPropertiesComponent *outComponent) noexcept {
+  if (outComponent == nullptr) {
+    return false;
+  }
+  ScriptPropertiesComponent component{};
+  if (value.type == core::JsonValue::Type::Object) {
+    if (!read_behaviour_property_object(parser, value, 0U, &component)) {
+      return false;
+    }
+  } else if (value.type == core::JsonValue::Type::Array) {
+    const std::size_t count = parser.array_size(value);
+    if ((count == 0U) || (count > kMaxScriptBehaviours)) {
+      return false;
+    }
+    for (std::size_t i = 0U; i < count; ++i) {
+      core::JsonValue element{};
+      if (!parser.get_array_element(value, i, &element) ||
+          !read_behaviour_property_object(parser, element, i, &component)) {
+        return false;
+      }
+    }
+  } else {
+    return false;
   }
   *outComponent = component;
   return true;

@@ -154,7 +154,7 @@ bool write_scene() noexcept {
   capsule.halfExtents = Vec3(0.3F, 0.6F, 0.3F);
   capsule.localPosition = Vec3(0.0F, 0.9F, 0.0F);
   engine::runtime::ScriptComponent script{};
-  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+  std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s",
                 kScriptPath);
   return add_box(*author, "Floor", Vec3(0.0F, -0.5F, 0.0F),
                  Vec3(30.0F, 0.5F, 30.0F)) &&

@@ -204,10 +204,12 @@ void push_override(lua_State *state,
 
 } // namespace
 
-// engine.get_property(entity, name) -> the entity's value of the property
-// its script declares, or the script's default when the entity has none;
-// nil, with a Warning once per script and property, when the script
-// declares no such property or the entity has no script.
+// engine.get_property(entity, name) -> the entity's value of the property,
+// or the declaring script's default when the entity has none; nil, with a
+// Warning once per script and property, when no behaviour of the entity
+// declares it or the entity has no script. Inside a behaviour's own hook,
+// `entity` being that hook's entity, the property is that behaviour's;
+// otherwise it is the first of the entity's behaviours that declares it.
 int lua_engine_get_property(lua_State *state) noexcept {
   runtime::Entity entity{};
   const char *name = lua_tostring(state, 2);
@@ -218,41 +220,64 @@ int lua_engine_get_property(lua_State *state) noexcept {
   }
   const RuntimeServices &services = *runtime_binding().services;
   runtime::World *world = runtime_binding().world;
+  // Copied, since loading a module runs Lua that may edit the list.
   runtime::ScriptComponent script{};
-  if ((services.get_script_component_op == nullptr) ||
-      !services.get_script_component_op(world, entity, &script) ||
-      (script.scriptPath[0] == '\0')) {
+  const runtime::ScriptComponent *live =
+      (services.find_script_component_op != nullptr)
+          ? services.find_script_component_op(world, entity)
+          : nullptr;
+  if (live != nullptr) {
+    script = *live;
+  }
+  const std::size_t count = math::script_behaviour_count(script);
+  if (count == 0U) {
     report_once("(no script)", name, "noscript",
                 "was read for an entity with no script");
     lua_pushnil(state);
     return 1;
   }
+  std::size_t first = 0U;
+  std::size_t last = count;
+  const std::size_t running =
+      math::find_script_behaviour(script, running_hook_script(entity));
+  if (running < count) {
+    first = running;
+    last = running + 1U;
+  }
   const int top = lua_gettop(state);
-  if (!push_entity_script_module(state, script.scriptPath)) {
-    lua_settop(state, top);
-    lua_pushnil(state);
-    return 1;
-  }
+  std::size_t behaviour = count;
   ScriptPropertyType declaredType{};
-  if (!push_declared_default(state, lua_gettop(state), name, &declaredType)) {
-    report_once(script.scriptPath, name, "undeclared",
-                "is not declared in the script's properties table, or not as "
-                "a bool, integer, float or string");
+  for (std::size_t b = first; (b < last) && (behaviour == count); ++b) {
+    lua_settop(state, top);
+    if (push_entity_script_module(state, script.behaviours[b].scriptPath) &&
+        push_declared_default(state, lua_gettop(state), name, &declaredType)) {
+      behaviour = b;
+    }
+  }
+  if (behaviour == count) {
+    report_once(script.behaviours[first].scriptPath, name, "undeclared",
+                (last - first == 1U)
+                    ? "is not declared in the script's properties table, or "
+                      "not as a bool, integer, float or string"
+                    : "is not declared in any of the entity's scripts, or "
+                      "not as a bool, integer, float or string");
     lua_settop(state, top);
     lua_pushnil(state);
     return 1;
   }
+  const char *scriptPath = script.behaviours[behaviour].scriptPath;
   // Stack: module, default.
   const math::ScriptPropertiesComponent *overrides =
       (services.find_script_properties_op != nullptr)
           ? services.find_script_properties_op(world, entity)
           : nullptr;
   const math::ScriptPropertiesComponent::Override *entry =
-      (overrides != nullptr) ? math::script_property_override(*overrides, name)
-                             : nullptr;
+      (overrides != nullptr)
+          ? math::script_property_override(*overrides, behaviour, name)
+          : nullptr;
   if ((entry != nullptr) && (entry->value.type != declaredType)) {
     // The script changed the property's type since the value was set.
-    report_once(script.scriptPath, name, "mismatch",
+    report_once(scriptPath, name, "mismatch",
                 "has a stored value of another type than the script now "
                 "declares; the default is used");
     entry = nullptr;

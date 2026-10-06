@@ -159,7 +159,7 @@ bool author_scene(engine::runtime::World &world) noexcept {
 
   const engine::runtime::Entity probe = world.create_scene_object();
   engine::runtime::ScriptComponent script{};
-  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+  std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s",
                 kEntityScript);
   return (probe != engine::runtime::kInvalidEntity) &&
          world.add_script_component(probe, script) &&

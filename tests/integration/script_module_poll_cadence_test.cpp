@@ -62,7 +62,7 @@ bool spawn_scripted(rt::World &world, const char *path,
       return false;
     }
     rt::ScriptComponent script{};
-    std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s", path);
+    std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s", path);
     if (!world.add_script_component(entity, script)) {
       return false;
     }

@@ -115,7 +115,7 @@ bool add_scripted(
   engine::runtime::NameComponent nameComponent{};
   std::snprintf(nameComponent.name, sizeof(nameComponent.name), "%s", name);
   engine::runtime::ScriptComponent script{};
-  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+  std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s",
                 kScriptPath);
   return (entity != engine::runtime::kInvalidEntity) &&
          world.add_name_component(entity, nameComponent) &&
@@ -146,12 +146,12 @@ bool write_scene() noexcept {
   ScriptPropertyValue wrongType{};
   wrongType.type = ScriptPropertyType::String;
   std::snprintf(wrongType.text, sizeof(wrongType.text), "%s", "far");
-  return engine::runtime::script_properties_set(&tuned, "speed",
+  return engine::runtime::script_properties_set(&tuned, 0U, "speed",
                                                 value_of(3.0F)) &&
-         engine::runtime::script_properties_set(&tuned, "lives", lives) &&
-         engine::runtime::script_properties_set(&tuned, "label", label) &&
-         engine::runtime::script_properties_set(&tuned, "enabled", enabled) &&
-         engine::runtime::script_properties_set(&stale, "amplitude",
+         engine::runtime::script_properties_set(&tuned, 0U, "lives", lives) &&
+         engine::runtime::script_properties_set(&tuned, 0U, "label", label) &&
+         engine::runtime::script_properties_set(&tuned, 0U, "enabled", enabled) &&
+         engine::runtime::script_properties_set(&stale, 0U, "amplitude",
                                                 wrongType) &&
          add_scripted(*author, "Tuned", &tuned) &&
          add_scripted(*author, "Plain", nullptr) &&

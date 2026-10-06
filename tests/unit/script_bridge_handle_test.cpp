@@ -89,7 +89,7 @@ void run(rt::World *world, const sc::RuntimeServices *services) noexcept {
   std::snprintf(name.name, sizeof(name.name), "%s", "ghost");
   check(!services->add_name_component_op(world, first, name),
         "stale handle cannot add a name");
-  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+  std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s",
                 "assets/scripts/player.lua");
   check(!services->add_script_component_op(world, first, script),
         "stale handle cannot add a script component");

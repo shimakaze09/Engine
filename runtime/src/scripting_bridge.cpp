@@ -1240,6 +1240,13 @@ bool scripting_get_tag_set_component_op(
          world->get_tag_set_component(entity, outComponent);
 }
 
+const runtime::ScriptComponent *
+scripting_find_script_component_op(runtime::World *world,
+                                   runtime::Entity entity) noexcept {
+  return (world != nullptr) ? world->get_script_component_ptr(entity)
+                            : nullptr;
+}
+
 const runtime::ScriptPropertiesComponent *
 scripting_find_script_properties_op(runtime::World *world,
                                     runtime::Entity entity) noexcept {
@@ -1562,6 +1569,7 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.add_camera_component_op = &scripting_add_camera_component_op;
   s.remove_camera_component_op = &scripting_remove_camera_component_op;
   s.get_tag_set_component_op = &scripting_get_tag_set_component_op;
+  s.find_script_component_op = &scripting_find_script_component_op;
   s.find_script_properties_op = &scripting_find_script_properties_op;
   s.add_tag_set_component_op = &scripting_add_tag_set_component_op;
   s.remove_tag_set_component_op = &scripting_remove_tag_set_component_op;

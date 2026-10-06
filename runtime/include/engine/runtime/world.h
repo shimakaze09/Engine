@@ -142,7 +142,11 @@ public:
   static constexpr std::size_t kMaxNameComponents = kMaxEntities;
   static constexpr std::size_t kMaxLightComponents =
       ENGINE_MAX_LIGHT_COMPONENTS;
-  static constexpr std::size_t kMaxScriptComponents = kMaxEntities;
+  // Scripted entities one World holds. Each lists up to eight behaviours
+  // inline (about 1 KB), so the pool is compact and bounded rather than
+  // one slot per entity; every one of them is a Lua call per callback, so
+  // a game past this many runs its logic in systems, not per-entity Lua.
+  static constexpr std::size_t kMaxScriptComponents = 8192U;
   static constexpr std::size_t kMaxSpringArmComponents = 64U;
   static constexpr std::size_t kMaxPointLightComponents = 128U;
   static constexpr std::size_t kMaxSpotLightComponents = 64U;
@@ -464,8 +468,8 @@ public:
   Entity find_entity_by_name(const char *name) const noexcept;
 
   /// Adds or replaces the entity's script component. Requires the Input phase
-  /// and a live entity; logs and returns false otherwise or when storage is
-  /// full.
+  /// and a live entity; logs and returns false otherwise, for a behaviour
+  /// list script_component_is_valid refuses, or when storage is full.
   bool add_script_component(Entity entity,
                             const ScriptComponent &component) noexcept;
   /// Removes the entity's script component. Requires the Input phase and a live
@@ -1036,8 +1040,8 @@ private:
       core::CompactSparseSet<Entity, LightComponent, kMaxEntities,
                              kMaxLightComponents>;
   using ScriptComponentSet =
-      core::SparseSet<Entity, ScriptComponent, kMaxEntities,
-                      kMaxScriptComponents>;
+      core::CompactSparseSet<Entity, ScriptComponent, kMaxEntities,
+                             kMaxScriptComponents>;
   using SpringArmSet =
       core::CompactSparseSet<Entity, SpringArmComponent, kMaxEntities,
                              kMaxSpringArmComponents>;

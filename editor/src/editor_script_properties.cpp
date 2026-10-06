@@ -167,14 +167,15 @@ bool draw_field(const char *label, const ScriptPropertyDecl &decl,
 /// Lists the values the entity keeps for properties its script does not
 /// declare (renamed, removed, or a script that does not read), each with
 /// Remove; they are never dropped silently.
-void draw_kept_values(runtime::Entity entity,
+void draw_kept_values(runtime::Entity entity, std::size_t behaviour,
                       const ScriptPropertiesComponent &overrides,
                       const ScriptPropertySchema *schema) noexcept {
   bool header = false;
   for (std::size_t i = 0U; i < overrides.count; ++i) {
     const ScriptPropertiesComponent::Override &entry = overrides.overrides[i];
-    if ((schema != nullptr) &&
-        (scripting::find_script_property(*schema, entry.name) != nullptr)) {
+    if ((entry.behaviour != behaviour) ||
+        ((schema != nullptr) &&
+         (scripting::find_script_property(*schema, entry.name) != nullptr))) {
       continue;
     }
     if (!header) {
@@ -189,7 +190,8 @@ void draw_kept_values(runtime::Entity entity,
     ImGui::SameLine();
     if (ImGui::SmallButton("Remove")) {
       ScriptPropertiesComponent edited = overrides;
-      static_cast<void>(runtime::script_properties_clear(&edited, entry.name));
+      static_cast<void>(
+          runtime::script_properties_clear(&edited, behaviour, entry.name));
       stage_overrides(entity, overrides, edited);
       inspector_commit_pending_edit();
       ImGui::PopID();
@@ -277,21 +279,23 @@ void script_property_label(const char *name, char *out,
 }
 
 bool script_properties_with_value(const ScriptPropertiesComponent &current,
-                                  const char *name,
+                                  std::size_t behaviour, const char *name,
                                   const ScriptPropertyValue &value,
                                   const ScriptPropertyValue &defaultValue,
                                   ScriptPropertiesComponent *out) noexcept {
   ScriptPropertiesComponent edited = current;
   if (math::script_property_values_equal(value, defaultValue)) {
-    static_cast<void>(runtime::script_properties_clear(&edited, name));
-  } else if (!runtime::script_properties_set(&edited, name, value)) {
+    static_cast<void>(
+        runtime::script_properties_clear(&edited, behaviour, name));
+  } else if (!runtime::script_properties_set(&edited, behaviour, name,
+                                             value)) {
     return false;
   }
   *out = edited;
   return true;
 }
 
-void draw_script_property_fields(runtime::Entity entity,
+void draw_script_property_fields(runtime::Entity entity, std::size_t behaviour,
                                  const char *scriptPath) noexcept {
   runtime::World *world = editor_session().world;
   if ((world == nullptr) || (scriptPath == nullptr) ||
@@ -312,7 +316,7 @@ void draw_script_property_fields(runtime::Entity entity,
     for (std::size_t i = 0U; i < schema->count; ++i) {
       const ScriptPropertyDecl &decl = schema->properties[i];
       const ScriptPropertiesComponent::Override *entry =
-          runtime::script_property_override(overrides, decl.name);
+          runtime::script_property_override(overrides, behaviour, decl.name);
       const bool stale =
           (entry != nullptr) && (entry->value.type != decl.defaultValue.type);
       const bool overridden = (entry != nullptr) && !stale;
@@ -358,12 +362,14 @@ void draw_script_property_fields(runtime::Entity entity,
       ScriptPropertiesComponent edited{};
       if (reset) {
         edited = overrides;
-        static_cast<void>(runtime::script_properties_clear(&edited, decl.name));
+        static_cast<void>(
+            runtime::script_properties_clear(&edited, behaviour, decl.name));
         stage_overrides(entity, overrides, edited);
         inspector_commit_pending_edit();
       } else if (changed &&
-                 script_properties_with_value(overrides, decl.name, value,
-                                              decl.defaultValue, &edited)) {
+                 script_properties_with_value(overrides, behaviour, decl.name,
+                                              value, decl.defaultValue,
+                                              &edited)) {
         stage_overrides(entity, overrides, edited);
       }
       ImGui::PopID();
@@ -378,7 +384,7 @@ void draw_script_property_fields(runtime::Entity entity,
                          schema->droppedDiagnostics, scriptPath);
     }
   }
-  draw_kept_values(entity, overrides, schema);
+  draw_kept_values(entity, behaviour, overrides, schema);
   ImGui::PopID();
 }
 

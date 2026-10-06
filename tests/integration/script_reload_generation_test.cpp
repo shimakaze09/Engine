@@ -100,7 +100,7 @@ void check_entity_module(engine::runtime::World *world,
                    "return M\n";
   const engine::runtime::Entity entity = world->create_entity();
   engine::runtime::ScriptComponent script{};
-  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+  std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s",
                 kModulePath);
   g_tests.check(save(kModulePath, v1) &&
                     (entity != engine::runtime::kInvalidEntity) &&

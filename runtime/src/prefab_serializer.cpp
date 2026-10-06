@@ -22,9 +22,10 @@ namespace engine::runtime {
 // Row membership and order for both prefab directions expand from
 // ENGINE_PERSISTENT_COMPONENT_TABLE; each type's prefab wire shape lives
 // in the decode/encode pair below (default: object-shaped reflected codec;
-// specials: Name's nested object, Script's legacy string-or-object with a
-// required path, Animation's string-or-object with a required path, and the
-// custom collider/mesh/light/foliage shapes).
+// specials: Name's nested object, Script's behaviour list (a string, the
+// legacy path object or an array) naming at least one script, Animation's
+// string-or-object with a required path, and the custom
+// collider/mesh/light/foliage shapes).
 
 /// Decodes one prefab component value into `out`; non-string shapes
 /// require a JSON object, matching the pre-registry per-row validation.
@@ -34,20 +35,9 @@ bool decode_prefab_component(const core::JsonParser &parser,
                              const ReflectedComponentDescriptors &descs,
                              std::uint32_t documentVersion, T *out) noexcept {
   if constexpr (std::is_same_v<T, ScriptComponent>) {
-    bool gotPath = false;
-    if (value.type == core::JsonValue::Type::String) {
-      gotPath = parser.copy_string_strict(value, out->scriptPath,
-                                          sizeof(out->scriptPath));
-    } else if (value.type == core::JsonValue::Type::Object) {
-      core::JsonValue pathValue{};
-      if (parser.get_object_field(value, "scriptPath", &pathValue)) {
-        gotPath = parser.copy_string_strict(pathValue, out->scriptPath,
-                                            sizeof(out->scriptPath));
-      }
-    } else {
-      return false;
-    }
-    return gotPath && (out->scriptPath[0] != '\0');
+    // A prefab's script row names at least one script.
+    return read_script_component(parser, value, true, out) &&
+           (script_behaviour_count(*out) > 0U);
   } else if constexpr (std::is_same_v<T, AnimationComponent>) {
     return read_animation_component(parser, value, true, out);
   } else if constexpr (std::is_same_v<T, TagSetComponent>) {
@@ -117,9 +107,7 @@ bool encode_prefab_component(core::JsonWriter &w, const char *key,
     w.end_object();
     return true;
   } else if constexpr (std::is_same_v<T, ScriptComponent>) {
-    if (component.scriptPath[0] != '\0') {
-      w.write_string(key, component.scriptPath);
-    }
+    write_script_component(w, key, component);
     return true;
   } else if constexpr (std::is_same_v<T, Transform>) {
     // The template is a single entity, so its Transform row is written as

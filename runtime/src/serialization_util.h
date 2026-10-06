@@ -307,23 +307,49 @@ bool read_nav_mesh_surface_component(
     const core::JsonParser &parser, const core::JsonValue &value,
     NavMeshSurfaceComponent *outComponent) noexcept;
 
+// --- ScriptComponent -------------------------------------------------------
+
+/// Writes an entity's behaviour list under `key`. One enabled behaviour
+/// writes the bare script path the format has always used, so existing
+/// files stay byte-identical. Any other list writes an array in call
+/// order: an enabled behaviour as its path, a disabled one as
+/// {"scriptPath": path, "enabled": false}. An empty list writes nothing.
+void write_script_component(core::JsonWriter &writer, const char *key,
+                            const ScriptComponent &component) noexcept;
+/// Reads a behaviour list: a path string (one enabled behaviour; the empty
+/// string is no behaviour), or an array of one to kMaxScriptBehaviours
+/// entries, each a path string or an object with a required "scriptPath"
+/// and an optional bool "enabled". `allowPathObject` also accepts a bare
+/// {"scriptPath": ...} object, the prefab format's legacy spelling. Strict:
+/// an empty or over-long path inside an array or object, a repeated
+/// script, an unknown member, an empty or too-long array, or any other
+/// JSON type fails the read; nothing is truncated or dropped.
+bool read_script_component(const core::JsonParser &parser,
+                           const core::JsonValue &value, bool allowPathObject,
+                           ScriptComponent *outComponent) noexcept;
+
 // --- ScriptPropertiesComponent ---------------------------------------------
 
-/// Writes an entity's script property overrides as an object under `key`,
-/// one member per override in their order: a bool as true/false, a string
-/// as a string, an integer as a JSON integer and a float always with a
-/// '.' or an exponent, so the reader tells the two apart as Lua 5.4 does.
-/// An empty set writes nothing.
+/// Writes an entity's script property overrides under `key`. When every
+/// override belongs to the first behaviour, the value is one object with a
+/// member per override in their order; otherwise it is an array holding
+/// one such object per behaviour index, up to the last one with an
+/// override, `{}` for a behaviour with none. A bool writes as true/false,
+/// a string as a string, an integer as a JSON integer and a float always
+/// with a '.' or an exponent, so the reader tells the two apart as Lua 5.4
+/// does. An empty set writes nothing.
 void write_script_properties_component(
     core::JsonWriter &writer, const char *key,
     const ScriptPropertiesComponent &component) noexcept;
-/// Reads a property override object. Strict: a value that is not an
-/// object, more than kMaxOverrides members, a name that is not a Lua
-/// identifier of at most 31 bytes, a repeated name, a string past 47 bytes,
-/// a non-finite or out-of-range number, or any other JSON type fails the
-/// read; nothing is truncated or dropped.
+/// Reads property overrides: an object (the first behaviour's) or an array
+/// of up to kMaxScriptBehaviours objects (behaviour i's at index i).
+/// Strict: any other shape, more than kMaxOverrides overrides in all, a
+/// name that is not a Lua identifier of at most 31 bytes, a name repeated
+/// within one behaviour, a string past 47 bytes, a non-finite or
+/// out-of-range number, or any other JSON type fails the read; nothing is
+/// truncated or dropped.
 bool read_script_properties_component(
-    const core::JsonParser &parser, const core::JsonValue &object,
+    const core::JsonParser &parser, const core::JsonValue &value,
     ScriptPropertiesComponent *outComponent) noexcept;
 
 // --- AnimationComponent ----------------------------------------------------

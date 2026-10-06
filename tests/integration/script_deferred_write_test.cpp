@@ -67,7 +67,7 @@ void run_begin_play_phase(rt::World *world) noexcept {
 rt::Entity make_scripted_entity(rt::World *world, const char *path) noexcept {
   const rt::Entity entity = world->create_scene_object();
   rt::ScriptComponent scriptComponent{};
-  std::snprintf(scriptComponent.scriptPath, sizeof(scriptComponent.scriptPath),
+  std::snprintf(scriptComponent.behaviours[0].scriptPath, sizeof(scriptComponent.behaviours[0].scriptPath),
                 "%s", path);
   if (!world->add_script_component(entity, scriptComponent)) {
     return rt::kInvalidEntity;

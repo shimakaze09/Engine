@@ -130,7 +130,7 @@ int main() {
     engine::runtime::PointLightComponent point{};
     const engine::runtime::Entity scripted = g_world->create_scene_object();
     engine::runtime::ScriptComponent script{};
-    std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+    std::snprintf(script.behaviours[0].scriptPath, sizeof(script.behaviours[0].scriptPath), "%s",
                   kScriptPath);
     if ((light == engine::runtime::kInvalidEntity) ||
         !g_world->add_name_component(light, name) ||

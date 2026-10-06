@@ -1160,6 +1160,16 @@ engine_add_test_executable(engine_integration_script_begin_play_retry
     integration
 )
 
+engine_add_test_executable(engine_integration_script_behaviours
+    SOURCES
+    script_behaviours_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_script_begin_play_spawn
     SOURCES
     script_begin_play_spawn_test.cpp

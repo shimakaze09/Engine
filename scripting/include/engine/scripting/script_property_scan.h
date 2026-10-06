@@ -28,7 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "engine/math/script_properties.h"
+#include "engine/math/script_behaviours.h"
 
 namespace engine::scripting {
 

@@ -93,7 +93,7 @@ int main() {
         "a Directional Light");
   engine::runtime::ScriptComponent script{};
   check(world->get_script_component(controller, &script) &&
-            (std::strcmp(script.scriptPath, "assets/main.lua") == 0),
+            (std::strcmp(script.behaviours[0].scriptPath, "assets/main.lua") == 0),
         "a Scene Controller running the default main script");
 
   // The shipped files are authored JSON; the comparison is semantic: each

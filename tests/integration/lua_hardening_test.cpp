@@ -258,7 +258,7 @@ bool test_tick_dispatch_survives_hostile_module_metatable() noexcept {
 
   const engine::runtime::Entity entity = session.world->create_entity();
   engine::runtime::ScriptComponent sc{};
-  std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kTempScript);
+  std::snprintf(sc.behaviours[0].scriptPath, sizeof(sc.behaviours[0].scriptPath), "%s", kTempScript);
   if ((entity == engine::runtime::kInvalidEntity) ||
       !session.world->add_script_component(entity, sc)) {
     remove_script();
@@ -283,7 +283,7 @@ engine::runtime::Entity add_scripted_entity(engine::runtime::World *world,
     return engine::runtime::kInvalidEntity;
   }
   engine::runtime::ScriptComponent sc{};
-  std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", path);
+  std::snprintf(sc.behaviours[0].scriptPath, sizeof(sc.behaviours[0].scriptPath), "%s", path);
   if (!world->add_script_component(entity, sc)) {
     return engine::runtime::kInvalidEntity;
   }
