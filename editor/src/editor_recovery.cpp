@@ -10,6 +10,7 @@
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
+#include "editor_autosave.h"
 #include "editor_project_files.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
@@ -61,6 +62,7 @@ bool write_recovery_copy(char *outPath, std::size_t capacity) noexcept {
     return false;
   }
   outPath[0] = '\0';
+  autosave_note_fatal_exit();
   EditorSession &session = editor_session();
   if (!session.initialized || (session.world == nullptr) ||
       !scene_document_is_dirty()) {
@@ -105,6 +107,8 @@ bool write_recovery_copy(char *outPath, std::size_t capacity) noexcept {
     return false;
   }
 
+  // The next launch offers it as it offers an autosave.
+  static_cast<void>(autosave_record_copy(path, fromSnapshot));
   const int length = std::snprintf(outPath, capacity, "%s", path);
   if ((length < 0) || (static_cast<std::size_t>(length) >= capacity)) {
     outPath[0] = '\0';

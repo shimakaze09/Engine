@@ -10,7 +10,9 @@
 //    the run still reports FatalFrame;
 //  - during Play the copy is the scene as it was before Play, not the
 //    play world;
-//  - a saved scene writes nothing.
+//  - a saved scene writes nothing;
+//  - the copy is recorded in the autosave manifest, so the next launch
+//    offers it (editor_autosave.h).
 // With the argument "device" it instead ends the process the way the
 // renderer ends it on a device fatal, through core::terminate_after_fatal;
 // run_fatal_device_recovery.cmake checks that process's exit code and the
@@ -127,6 +129,23 @@ std::string read_file(const std::string &path) {
   return text.str();
 }
 
+/// The autosave manifest the last run_fatal left, "" when none.
+std::string g_manifest;
+
+/// Reads and removes the project's autosave folder, before shutdown
+/// forgets which project it was.
+std::string take_autosave_manifest() {
+  char dataDir[1024] = {};
+  if (!engine::core::project_data_dir(dataDir, sizeof(dataDir))) {
+    return std::string();
+  }
+  const std::string folder = std::string(dataDir) + "/Autosave";
+  std::string manifest = read_file(folder + "/autosave.json");
+  std::error_code ec;
+  std::filesystem::remove_all(folder, ec);
+  return manifest;
+}
+
 /// One run that fails its first frame; returns the recovery file's text
 /// ("" when the note names none) after removing the file.
 std::string run_fatal(Setup setup, engine::RunResult *outResult) {
@@ -142,6 +161,7 @@ std::string run_fatal(Setup setup, engine::RunResult *outResult) {
   *outResult = engine::run(10U);
   const std::string path =
       recovery_path_from_note(engine::fatal_recovery_note());
+  g_manifest = take_autosave_manifest();
   engine::shutdown();
   if (path.empty()) {
     return std::string();
@@ -190,6 +210,9 @@ int main(int argc, char **argv) {
         "the injected failure still ends the run fatally");
   CHECK(stopped.find("\"AuthoredEdit\"") != std::string::npos,
         "the unsaved scene is written to Recovery/ before the World goes");
+  CHECK((g_manifest.find("\"Recovery/") != std::string::npos) &&
+            (g_manifest.find("\"beforePlay\": false") != std::string::npos),
+        "the copy is recorded for the next launch to offer");
 
   const std::string playing = run_fatal(Setup::UnsavedPlaying, &result);
   CHECK(result == engine::RunResult::FatalFrame, "a fatal during Play");
@@ -197,12 +220,15 @@ int main(int argc, char **argv) {
         "during Play the recovery copy holds the authored scene");
   CHECK(playing.find("\"PlayOnly\"") == std::string::npos,
         "during Play the recovery copy leaves out what Play spawned");
+  CHECK(g_manifest.find("\"beforePlay\": true") != std::string::npos,
+        "the recorded copy says it is the scene before Play");
 
   const std::string saved = run_fatal(Setup::Saved, &result);
   CHECK(result == engine::RunResult::FatalFrame,
         "a fatal with nothing unsaved");
   CHECK(saved.empty() && (engine::fatal_recovery_note()[0] == '\0'),
         "a saved scene leaves no recovery copy and no note");
+  CHECK(g_manifest.empty(), "and records nothing to offer");
 
   engine::core::clear_project_data_root();
   if (g_failures != 0) {

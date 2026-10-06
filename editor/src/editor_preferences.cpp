@@ -5,6 +5,7 @@
 
 #include "editor_preferences.h"
 
+#include "editor_autosave.h"
 #include "editor_panels_diagnostics.h"
 
 #include "editor_scene_query.h"
@@ -50,6 +51,8 @@ constexpr const char *kShowStatsKey = "ShowStats=";
 constexpr const char *kCameraSpeedKey = "CameraSpeed=";
 /// The Scene view's icon size, a multiple of the UI scale's.
 constexpr const char *kIconScaleKey = "IconScale=";
+/// Minutes between autosaves of an unsaved scene; 0 is off.
+constexpr const char *kAutosaveMinutesKey = "AutosaveMinutes=";
 
 /// The geometry the layout file stored, and whether it waits to be
 /// applied.
@@ -149,6 +152,22 @@ void read_line(ImGuiContext *, ImGuiSettingsHandler *, void *,
     }
     return;
   }
+  const std::size_t autosaveKeyLength = std::strlen(kAutosaveMinutesKey);
+  if (std::strncmp(line, kAutosaveMinutesKey, autosaveKeyLength) == 0) {
+    const char *value = line + autosaveKeyLength;
+    const char *valueEnd = value + std::strlen(value);
+    int minutes = 0;
+    const std::from_chars_result parsed =
+        std::from_chars(value, valueEnd, minutes);
+    if ((parsed.ec == std::errc{}) && (parsed.ptr == valueEnd) &&
+        (minutes >= 0) && (minutes <= kMaxAutosaveMinutes)) {
+      set_autosave_minutes(minutes);
+    } else {
+      core::log_message(core::LogLevel::Warning, "editor",
+                        "stored AutosaveMinutes is not 0 to 60; ignored");
+    }
+    return;
+  }
   const std::size_t statsKeyLength = std::strlen(kShowStatsKey);
   if (std::strncmp(line, kShowStatsKey, statsKeyLength) == 0) {
     const char *value = line + statsKeyLength;
@@ -231,6 +250,7 @@ void write_all(ImGuiContext *, ImGuiSettingsHandler *handler,
                   static_cast<double>(editor_session().editorCamera.flySpeed));
   buffer->appendf("%s%.9g\n", kIconScaleKey,
                   static_cast<double>(editor_session().iconScale));
+  buffer->appendf("%s%d\n", kAutosaveMinutesKey, autosave_minutes());
   for (std::size_t i = 0U; i < editor_shortcut_count(); ++i) {
     const EditorShortcut &row = editor_shortcut_at(i);
     char chord[40] = {};
@@ -415,6 +435,19 @@ void draw_editor_preferences_panel() noexcept {
     if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip("Size of the light and camera icons in the Scene "
                         "view, which are picked within what they draw");
+    }
+    ImGui::SeparatorText("Autosave");
+    int minutes = autosave_minutes();
+    if (ImGui::SliderInt("Every", &minutes, 0, kMaxAutosaveMinutes,
+                         (minutes == 0) ? "off" : "%d min",
+                         ImGuiSliderFlags_AlwaysClamp)) {
+      set_autosave_minutes(minutes);
+      ImGui::MarkIniSettingsDirty();
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("How often an unsaved scene is copied to the "
+                        "project's data folder, never over its file. After "
+                        "a crash the next launch offers the copy.");
     }
     draw_shortcut_bindings();
   } else {
