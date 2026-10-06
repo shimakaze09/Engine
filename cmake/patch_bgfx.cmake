@@ -42,4 +42,18 @@ function(engine_patch_bgfx bgfx_superproject_dir)
         "m_currentFence   = 0;"
         "m_currentFence   = 1;"
         "Direct3D 12 first command list signals fence 1")
+    # The uniform ring grows by inserting a chunk where its write head is.
+    # The original wrapped that position modulo the chunk count, so a ring
+    # of two chunks put the new one first. That shifted every chunk's place
+    # in the ring, and the next frame wrote its uniforms into the chunk the
+    # previous frame was still drawing from. Direct3D 12 starts with two
+    # chunks and grows on the process's second frame, so that frame drew
+    # with the third frame's uniforms. Upstream fixed it in bgfx 8dbdcf4
+    # ("ChunkedScratchBufferT: grow the ring where the write head is.");
+    # this is that fix, kept until the pin moves past it.
+    engine_patch_bgfx_file(
+        "${bgfx_superproject_dir}/bgfx/src/renderer.h"
+        "const uint32_t chunkIndex = at % bx::max(m_chunks.size(), 1);"
+        "const uint32_t chunkIndex = bx::min<uint32_t>(at, uint32_t(m_chunks.size() ) );"
+        "scratch ring grows at its write head")
 endfunction()

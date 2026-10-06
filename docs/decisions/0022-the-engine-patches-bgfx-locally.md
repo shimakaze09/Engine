@@ -2,6 +2,12 @@
 
 **Date:** 2026-10-04. Decided while fixing #1223.
 
+**Status:** In use, with a second fix since 2026-10-06. That fix is a
+backport of upstream bgfx 8dbdcf4 and turned out to be #1223's cause: the
+uniform ring grew by inserting a chunk at the wrong place, so frame 3
+wrote over the uniforms frame 2 was still drawing with. Each fix and its
+reason are in `cmake/patch_bgfx.cmake`.
+
 ## Context
 
 bgfx is fetched at a pinned commit (`CMakeLists.txt`, checked by
