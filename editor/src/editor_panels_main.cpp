@@ -15,6 +15,7 @@
 #include "editor_play_recording.h"
 #include "editor_project_hub.h"
 #include "editor_scene_document.h"
+#include "editor_scene_templates.h"
 #include "editor_session.h"
 #include "editor_shortcuts.h"
 
@@ -313,6 +314,36 @@ void draw_main_menu_bar() noexcept {
     // table. Replacing or exporting the world stays available after a
     // failed Stop restore; only saving in place needs the editable world.
     editor_action_menu_item(EditorAction::NewScene);
+    if (ImGui::BeginMenu("New Scene from Template", world_can_load_scene())) {
+      // Read only while the menu is open; a template added on disk shows
+      // the next time it opens.
+      static SceneTemplate templates[kMaxSceneTemplates];
+      const std::size_t count =
+          list_scene_templates(templates, kMaxSceneTemplates);
+      bool projectHeading = false;
+      for (std::size_t i = 0U; i < count; ++i) {
+        if (!templates[i].builtIn && !projectHeading) {
+          ImGui::SeparatorText("This project's templates");
+          projectHeading = true;
+        }
+        ImGui::PushID(static_cast<int>(i));
+        if (ImGui::MenuItem(templates[i].label)) {
+          request_scene_new_from_template(templates[i].path);
+        }
+        ImGui::SetItemTooltip(
+            "%s", templates[i].builtIn
+                      ? "A camera and a light, as a new project starts"
+                      : templates[i].path);
+        ImGui::PopID();
+      }
+      if (!projectHeading) {
+        ImGui::Separator();
+        ImGui::TextDisabled("Save a scene in %s/ under the project's "
+                            "content to list it here",
+                            kProjectSceneTemplatesFolder);
+      }
+      ImGui::EndMenu();
+    }
     editor_action_menu_item(EditorAction::OpenScene);
 
     const std::size_t recentCount = recent_scene_count();

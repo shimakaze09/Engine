@@ -9,6 +9,7 @@
 #include "editor_commands.h"
 #include "editor_scene_document.h"
 #include "editor_scene_document_fixture.h"
+#include "editor_scene_templates.h"
 #include "editor_session.h"
 #include "engine/content/asset_sidecar.h"
 #include "engine/core/logging.h"
@@ -20,6 +21,8 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <new>
 #include <string>
@@ -252,6 +255,158 @@ int check_perform_scene_new_resets_identity() {
 
   editor_set_world(nullptr);
   return 0;
+}
+
+/// The bytes of the file at `path`, or "" when it cannot be read.
+std::string file_bytes(const char *path) {
+  std::ifstream in(path, std::ios::binary);
+  return std::string((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+}
+
+/// EXPECTATION: New Scene from Template opens the template's entities as
+/// an untitled scene with nothing unsaved; saving it asks for a new path,
+/// and the template's file is never written.
+int check_new_from_template_opens_untitled_and_clean() {
+  char templatePath[512] = {};
+  char savedPath[512] = {};
+  if (!ensure_scratch_root() ||
+      !make_scratch_path("template.scene", templatePath,
+                         sizeof(templatePath)) ||
+      !make_scratch_path("from_template.scene", savedPath, sizeof(savedPath))) {
+    return 1;
+  }
+  static_cast<void>(std::remove(savedPath));
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 2;
+  }
+  editor_set_world(world.get());
+  if ((add_named_entity(*world, "TemplateCamera") == kInvalidEntity) ||
+      (add_named_entity(*world, "TemplateLight") == kInvalidEntity) ||
+      !perform_scene_save_as(templatePath) || !perform_scene_new()) {
+    editor_set_world(nullptr);
+    return 3;
+  }
+  const std::string templateBytes = file_bytes(templatePath);
+
+  request_scene_new_from_template(templatePath);
+  if (scene_document_has_path() ||
+      (std::strcmp(scene_document_display_name(), "Untitled Scene") != 0) ||
+      scene_document_is_dirty() || (world->alive_entity_count() != 2U) ||
+      (world->find_entity_by_name("TemplateLight") == kInvalidEntity)) {
+    editor_set_world(nullptr);
+    return 4;
+  }
+  // An edit and a save land in the new file, not the template.
+  const Entity camera = world->find_entity_by_name("TemplateCamera");
+  if (!push_transform_edit(*world, camera) || !scene_document_is_dirty() ||
+      perform_scene_save() || !perform_scene_save_as(savedPath)) {
+    editor_set_world(nullptr);
+    return 5;
+  }
+  const bool ok = (file_bytes(templatePath) == templateBytes) &&
+                  (std::strcmp(scene_document_path(), savedPath) == 0);
+  editor_set_world(nullptr);
+  return ok ? 0 : 6;
+}
+
+/// EXPECTATION: over unsaved changes, New Scene from Template waits for the
+/// unsaved-change prompt; Discard then opens the template, and a template
+/// that does not load leaves the document and the World as they were.
+int check_new_from_template_waits_and_refuses() {
+  char templatePath[512] = {};
+  char scenePath[512] = {};
+  if (!ensure_scratch_root() ||
+      !make_scratch_path("template_two.scene", templatePath,
+                         sizeof(templatePath)) ||
+      !make_scratch_path("working.scene", scenePath, sizeof(scenePath))) {
+    return 1;
+  }
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 2;
+  }
+  editor_set_world(world.get());
+  if ((add_named_entity(*world, "FromTemplate") == kInvalidEntity) ||
+      !perform_scene_save_as(templatePath) || !perform_scene_new()) {
+    editor_set_world(nullptr);
+    return 3;
+  }
+  const Entity mine = add_named_entity(*world, "Mine");
+  if ((mine == kInvalidEntity) || !perform_scene_save_as(scenePath) ||
+      !push_transform_edit(*world, mine) || !scene_document_is_dirty()) {
+    editor_set_world(nullptr);
+    return 4;
+  }
+
+  request_scene_new_from_template("/nonexistent/template.scene");
+  perform_scene_new_from_template("/nonexistent/template.scene");
+  if (scene_document_prompt_open() || !scene_document_is_dirty() ||
+      (std::strcmp(scene_document_path(), scenePath) != 0) ||
+      (world->find_entity_by_name("Mine") == kInvalidEntity)) {
+    editor_set_world(nullptr);
+    return 5;
+  }
+
+  request_scene_new_from_template(templatePath);
+  if (!scene_document_prompt_open() ||
+      (world->find_entity_by_name("Mine") == kInvalidEntity)) {
+    editor_set_world(nullptr);
+    return 6;
+  }
+  scene_document_prompt_choose_discard();
+  const bool ok =
+      !scene_document_prompt_open() && !scene_document_has_path() &&
+      !scene_document_is_dirty() &&
+      (world->find_entity_by_name("FromTemplate") != kInvalidEntity) &&
+      (world->find_entity_by_name("Mine") == kInvalidEntity);
+  editor_set_world(nullptr);
+  return ok ? 0 : 7;
+}
+
+/// EXPECTATION: the template list offers the engine's Basic scene first,
+/// then the project's templates/ scenes by name, other files skipped.
+int check_scene_template_list() {
+  char root[900] = {};
+  if (!ensure_scratch_root() || !scratch_root(root, sizeof(root))) {
+    return 1;
+  }
+  namespace fs = std::filesystem;
+  std::error_code ec{};
+  const fs::path engineRoot = fs::path(root) / "engine_root";
+  const fs::path assetRoot = fs::path(root) / "project_assets";
+  fs::remove_all(engineRoot, ec);
+  fs::remove_all(assetRoot, ec);
+  const fs::path basic = engineRoot / kBasicSceneTemplate;
+  fs::create_directories(basic.parent_path(), ec);
+  fs::create_directories(assetRoot / kProjectSceneTemplatesFolder, ec);
+  for (const fs::path &file :
+       {basic, assetRoot / kProjectSceneTemplatesFolder / "level_b.scene",
+        assetRoot / kProjectSceneTemplatesFolder / "level_a.scene",
+        assetRoot / kProjectSceneTemplatesFolder / "notes.txt"}) {
+    std::ofstream out(file, std::ios::binary);
+    if (!out) {
+      return 2;
+    }
+  }
+  SceneTemplate templates[kMaxSceneTemplates];
+  const std::size_t count = list_scene_templates_in(
+      engineRoot.string().c_str(), assetRoot.string().c_str(), templates,
+      kMaxSceneTemplates);
+  const bool listed = (count == 3U) && templates[0].builtIn &&
+                      (std::strcmp(templates[0].label, "Basic") == 0) &&
+                      !templates[1].builtIn &&
+                      (std::strcmp(templates[1].label, "level_a") == 0) &&
+                      (std::strcmp(templates[2].label, "level_b") == 0);
+  const bool noRoots =
+      list_scene_templates_in("", "", templates, kMaxSceneTemplates) == 0U;
+  fs::remove_all(engineRoot, ec);
+  fs::remove_all(assetRoot, ec);
+  if (!listed) {
+    return 3;
+  }
+  return noRoots ? 0 : 4;
 }
 
 /// EXPECTATION: a failed Open leaves the current document identity, dirty
@@ -1006,6 +1161,11 @@ int main() {
       {"check_recent_scenes_unreadable_file_never_overwritten",
        &check_recent_scenes_unreadable_file_never_overwritten},
       {"check_save_over_external_change", &check_save_over_external_change},
+      {"check_new_from_template_opens_untitled_and_clean",
+       &check_new_from_template_opens_untitled_and_clean},
+      {"check_new_from_template_waits_and_refuses",
+       &check_new_from_template_waits_and_refuses},
+      {"check_scene_template_list", &check_scene_template_list},
   };
 
   char recentScratch[1000] = {};
