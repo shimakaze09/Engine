@@ -3,11 +3,12 @@
 // path that opens no project is refused with the reason and its detail in
 // the hub and requests no switch, and the modal that shows it while a
 // project is open names it until acknowledged; a document the codec
-// refuses shows the codec's reason; creating a project from the engine's
-// template lists it by its .project document and requests the switch to it; a
-// project opened by its directory is listed by its document, once; a name the
-// document refuses creates nothing; and the hub draws its title, actions
-// and every recent project.
+// refuses shows the codec's reason; a listed project that is gone stays
+// listed and is marked missing until removed; creating a project from the
+// engine's template lists it by its .project document and requests the switch
+// to it; a project opened by its directory is listed by its document, once; a
+// name the document refuses creates nothing; and the hub draws its title,
+// actions and every recent project.
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -227,6 +228,34 @@ int main() {
   g_tests.check((window != nullptr) && window->Active &&
                     (window->Size.x == io.DisplaySize.x),
                 "over the whole viewport");
+
+  // A listed project that is gone stays listed, marked, after the list
+  // is read again: it may be on a drive that is not connected.
+  g_tests.check(project_hub_create(location.c_str(), "Gone") &&
+                    (take_switch() != "(none)"),
+                "a second project is created");
+  const std::string goneFile =
+      (fs::path(location) / "Gone" / "Gone.project").generic_string();
+  fs::remove_all(fs::path(location) / "Gone", ec);
+  project_hub_reset();
+  g_tests.check((recent_list_count(&recent_projects()) == 2U) &&
+                    (goneFile == recent_list_at(&recent_projects(), 0U)),
+                "a project that is gone is kept in the list when it is read");
+  const std::string marked = hub_frame();
+  g_tests.check(marked.find("Missing: " + goneFile) != std::string::npos,
+                "and the hub marks it missing");
+  g_tests.check(marked.find("Missing: " + gameFile) == std::string::npos,
+                "but not a project that is there");
+  g_tests.check(!project_hub_open(goneFile.c_str()) &&
+                    (take_switch() == "(none)") &&
+                    (recent_list_count(&recent_projects()) == 2U),
+                "opening it is refused, and it stays listed");
+  project_hub_acknowledge_error();
+  recent_list_remove(&recent_projects(), goneFile.c_str());
+  project_hub_reset();
+  g_tests.check((recent_list_count(&recent_projects()) == 1U) &&
+                    (gameFile == recent_list_at(&recent_projects(), 0U)),
+                "Remove drops it for good");
   ImGui::DestroyContext();
 
   project_hub_reset();

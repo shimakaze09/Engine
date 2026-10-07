@@ -2,11 +2,12 @@
 // most recent first, kept per user: in the platform save directory, or in
 // a directory the list names (Recent Scenes lives in the open project's
 // per-user data). Recent scenes and recent projects are two lists of this
-// one kind. Each is read
-// once per session, drops entries that no longer exist, and is written
-// back through a staged atomic replacement after every change; a stored
-// list the session could not read is never overwritten, so a transient
-// read fault cannot erase it.
+// one kind. Each is read once per session, drops the entries its
+// stillExists check rejects (Recent Scenes drops a scene that is gone;
+// Recent Projects keeps a project that is gone and the hub marks it), and
+// is written back through a staged atomic replacement after every change;
+// a stored list the session could not read is never overwritten, so a
+// transient read fault cannot erase it.
 
 #pragma once
 
