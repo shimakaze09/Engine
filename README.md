@@ -252,6 +252,13 @@ Overwrite or Reload from Disk), as Unity and Godot ask about an asset changed
 outside the editor. A file deleted in the meantime is simply written again
 (`engine_unit_editor_scene_document`, `engine_unit_editor_material_edit`).
 
+File > New Scene starts an empty scene. File > New Scene from Template, as
+Unity's New Scene dialog does, offers Basic (a camera and a light: the
+scene a new project starts with) and every scene saved in the project's
+`templates/` folder under its content root. The chosen scene opens
+untitled with nothing unsaved, so Save asks where to put it and the
+template itself is never written (`engine_unit_editor_scene_document`).
+
 `engine_player` runs a game without the editor, as a Unity player build or a
 Godot export does: `engine_player path/to/my_game` (the sample beside it
 with none) opens a window titled with the project's name and plays its
@@ -317,8 +324,9 @@ It starts on an empty 3D scene, as a new Unity project does. The scene holds a
 Main Camera, a Directional Light, and a Scene Controller entity running
 `assets/main.lua`, whose hooks start empty. The player boots
 `assets/main.scene`, the same scene; `engine_integration_startup_template`
-keeps the two identical. File > Open Scene... opens the Island Hopper
-template (`assets/templates/island_hopper.scene`) and the sample scenes
+keeps the two identical. File > New Scene from Template lists the Island
+Hopper template (`assets/templates/island_hopper.scene`), and File > Open
+Scene... opens the sample scenes
 (`assets/samples/playground.scene`, `assets/coin_run.scene`,
 `assets/shading_models.scene`).
 

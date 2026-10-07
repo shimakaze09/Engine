@@ -27,6 +27,7 @@ static_assert(kMaxDocumentPathLength == kMaxRecentPathLength,
 enum class PendingSceneAction : std::uint8_t {
   None,
   New,
+  NewFromTemplate,
   OpenPath,
   Quit,
   SwitchProject
@@ -110,6 +111,11 @@ const char *scene_document_last_error() noexcept;
 /// request_scene_new for the gated entry point. False when the world is
 /// unbound or not currently editable (bound, stopped, Input phase).
 bool perform_scene_new() noexcept;
+/// Opens the scene at `templatePath` as a new, untitled scene with nothing
+/// unsaved: Save asks where to put it, and the template's own file is never
+/// written. False, with the World and the document unchanged, when the
+/// template does not load (the scene loader's transaction).
+bool perform_scene_new_from_template(const char *templatePath) noexcept;
 /// Loads the scene file at `path` into the attached world and adopts it
 /// as the document identity on success. The previous world/document/
 /// history are left completely untouched on failure (load_scene is
@@ -146,6 +152,11 @@ bool scene_path_passes_jail(const char *path) noexcept;
 /// otherwise arm the unsaved-change prompt and defer. Refused while
 /// playing; available after a failed Stop restore, as the recovery path.
 void request_scene_new() noexcept;
+/// File > New Scene from Template: as request_scene_new, through the
+/// unsaved-changes prompt, then perform_scene_new_from_template. A
+/// template that is not a file is refused first, with a Warning, so no
+/// prompt asks about one.
+void request_scene_new_from_template(const char *templatePath) noexcept;
 void request_scene_open(const char *path) noexcept;
 /// True when the caller may proceed with an immediate quit (the scene
 /// document and any open material document were both clean); false means

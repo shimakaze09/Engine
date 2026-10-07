@@ -116,6 +116,9 @@ void continue_pending_action() noexcept {
   case PendingSceneAction::New:
     static_cast<void>(perform_scene_new());
     break;
+  case PendingSceneAction::NewFromTemplate:
+    static_cast<void>(perform_scene_new_from_template(doc.pendingOpenPath));
+    break;
   case PendingSceneAction::OpenPath:
     static_cast<void>(perform_scene_open(doc.pendingOpenPath));
     break;
@@ -201,6 +204,20 @@ bool perform_scene_new() noexcept {
   }
 
   runtime::reset_world(*session.world);
+  reset_session_for_scene_switch();
+  reset_document_identity(session.document);
+  return true;
+}
+
+bool perform_scene_new_from_template(const char *templatePath) noexcept {
+  EditorSession &session = editor_session();
+  if ((templatePath == nullptr) || (templatePath[0] == '\0') ||
+      !world_can_load_scene()) {
+    return false;
+  }
+  if (!runtime::load_scene(*session.world, templatePath)) {
+    return false;
+  }
   reset_session_for_scene_switch();
   reset_document_identity(session.document);
   return true;
@@ -482,6 +499,29 @@ void request_scene_new() noexcept {
     return;
   }
   arm_pending_action(PendingSceneAction::New, nullptr);
+}
+
+void request_scene_new_from_template(const char *templatePath) noexcept {
+  if ((templatePath == nullptr) || (templatePath[0] == '\0') ||
+      !world_can_load_scene()) {
+    return;
+  }
+  // Checked before the unsaved-change prompt, so the author is never asked
+  // to save or discard for a template that is gone.
+  std::error_code ec{};
+  if (!std::filesystem::is_regular_file(templatePath, ec) || ec) {
+    char message[700] = {};
+    std::snprintf(message, sizeof(message),
+                  "the scene template %.600s is not a file; nothing opened",
+                  templatePath);
+    core::log_message(core::LogLevel::Warning, kLogChannel, message);
+    return;
+  }
+  if (!scene_document_is_dirty()) {
+    static_cast<void>(perform_scene_new_from_template(templatePath));
+    return;
+  }
+  arm_pending_action(PendingSceneAction::NewFromTemplate, templatePath);
 }
 
 void request_scene_open(const char *path) noexcept {
