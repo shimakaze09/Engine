@@ -4,7 +4,12 @@
 // start to finish, headless, by real key events through the production
 // input stage — eight coins, the moving platform across the gap, the flag.
 // Every frame carries an injected fixed delta, so the run is one fixed
-// step a frame and the route is counted in steps, never in time.
+// step a frame and the route is counted in steps, never in time. The
+// route's keys are its only input: window focus changes, on which the
+// engine releases every held key, are dropped before the engine sees
+// them, so a shared desktop cannot cut a scripted hold short. Each play
+// scripts one focus loss mid-hold to prove the drop, and the run reports
+// any others it met.
 //
 // It passes when all eight coins are gone, the controller script has
 // announced the win exactly once, and a second play of the same scene ends
@@ -71,6 +76,27 @@ bool bridge_is_paused() noexcept { return false; }
 
 int g_winsAnnounced = 0;
 int g_scriptErrors = 0;
+
+/// Window focus changes dropped in this session, the scripted ones
+/// included; a run on a shared desktop reports any others it met.
+int g_focusChangesDropped = 0;
+
+/// Focus changes each play scripts: one loss and one regain.
+constexpr int kScriptedFocusChanges = 2;
+
+/// Keeps the route's keys the only input. A window that loses focus has
+/// the engine release every held key, as a player's game should, so a
+/// focus change on a shared desktop would cut a scripted hold short and
+/// the open-loop route would miss coins. Focus changes are dropped before
+/// they reach the engine's event queue, and counted.
+bool SDLCALL keep_route_input(void *, SDL_Event *event) {
+  if ((event->type == SDL_EVENT_WINDOW_FOCUS_LOST) ||
+      (event->type == SDL_EVENT_WINDOW_FOCUS_GAINED)) {
+    ++g_focusChangesDropped;
+    return false;
+  }
+  return true;
+}
 
 /// The controller script's only outward sign of the win is its log line.
 void watch_log(engine::core::LogLevel, const char *, const char *message,
@@ -165,6 +191,35 @@ bool hold(engine::EnginePipeline &pipeline, SDL_Scancode scancode,
   return push_key(scancode, false) && frame(pipeline);
 }
 
+/// Pushes a window focus change. SDL reports a push the event filter
+/// dropped as a failure, and dropping it is what keep_route_input does, so
+/// the result is not read; the session's dropped count is the check.
+void push_focus(bool gained) noexcept {
+  SDL_Event event{};
+  event.type =
+      gained ? SDL_EVENT_WINDOW_FOCUS_GAINED : SDL_EVENT_WINDOW_FOCUS_LOST;
+  static_cast<void>(SDL_PushEvent(&event));
+}
+
+/// As hold(), with the window losing focus `lostAt` steps in and regaining
+/// it a step later, as a shared desktop may do mid-play.
+bool hold_through_focus_change(engine::EnginePipeline &pipeline,
+                               SDL_Scancode scancode, int steps,
+                               int lostAt) noexcept {
+  if (!push_key(scancode, true)) {
+    return false;
+  }
+  for (int i = 0; i < steps; ++i) {
+    if ((i == lostAt) || (i == (lostAt + 1))) {
+      push_focus(i != lostAt);
+    }
+    if (!frame(pipeline)) {
+      return false;
+    }
+  }
+  return push_key(scancode, false) && frame(pipeline);
+}
+
 bool idle(engine::EnginePipeline &pipeline, int steps) noexcept {
   for (int i = 0; i < steps; ++i) {
     if (!frame(pipeline)) {
@@ -249,6 +304,11 @@ PlayResult play_once(engine::EnginePipeline &pipeline) noexcept {
     played += steps + 1;
     return hold(pipeline, key, steps);
   };
+  const auto run_through_focus_change = [&](SDL_Scancode key, int steps,
+                                            int lostAt) noexcept {
+    played += steps + 1;
+    return hold_through_focus_change(pipeline, key, steps, lostAt);
+  };
   const auto wait = [&](int steps) noexcept {
     played += steps;
     return idle(pipeline, steps);
@@ -262,7 +322,9 @@ PlayResult play_once(engine::EnginePipeline &pipeline) noexcept {
   bool ok = wait(30);
   ok = ok && run(SDL_SCANCODE_W, 27);                            // Coin1 (0, 3)
   ok = ok && run(SDL_SCANCODE_A, 40) && run(SDL_SCANCODE_W, 27); // Coin2
-  ok = ok && run(SDL_SCANCODE_A, 27) && run(SDL_SCANCODE_W, 40); // Coin3
+  // The window loses focus halfway up this leg, and gets it back.
+  ok = ok && run(SDL_SCANCODE_A, 27) &&
+       run_through_focus_change(SDL_SCANCODE_W, 40, 20);         // Coin3
   ok = ok && run(SDL_SCANCODE_D, 40) && run(SDL_SCANCODE_W, 27); // Coin4
   ok = ok && run(SDL_SCANCODE_D, 67) && run(SDL_SCANCODE_S, 13); // Coin5
   ok = ok && run(SDL_SCANCODE_S, 40) && run(SDL_SCANCODE_D, 33); // Coin6
@@ -307,6 +369,7 @@ struct SessionResult final {
   bool readsBackFrames = false;
   bool pipelineReady = false;
   bool sinkRegistered = false;
+  int focusChangesDropped = 0;
   PlayResult first{};
   PlayResult second{};
 };
@@ -338,6 +401,8 @@ SessionResult run_session(bool headless) noexcept {
   session.presentsScene =
       headless || engine::core::cvar_set_bool("r_present_scene", true);
   session.sinkRegistered = engine::core::log_register_sink(&watch_log, nullptr);
+  g_focusChangesDropped = 0;
+  SDL_SetEventFilter(&keep_route_input, nullptr);
   g_winsAnnounced = 0;
   g_scriptErrors = 0;
   {
@@ -349,6 +414,8 @@ SessionResult run_session(bool headless) noexcept {
     }
     pipeline.teardown();
   }
+  SDL_SetEventFilter(nullptr, nullptr);
+  session.focusChangesDropped = g_focusChangesDropped;
   engine::core::log_unregister_sink(&watch_log, nullptr);
   engine::runtime::set_editor_bridge(nullptr);
   engine::shutdown();
@@ -368,6 +435,9 @@ void print_session(const char *label, const SessionResult &session) noexcept {
               static_cast<double>(first.finalPosition.z),
               static_cast<unsigned long long>(first.hash), second.coinsLeft,
               second.wins, static_cast<unsigned long long>(second.hash));
+  std::printf("coin_run_acceptance_test (%s): %d window focus change(s) "
+              "dropped, %d of them scripted\n",
+              label, session.focusChangesDropped, 2 * kScriptedFocusChanges);
   if (session.readsBackFrames) {
     std::printf("coin_run_acceptance_test (%s): last frames hold %zu and %zu "
                 "distinct colours; the second is at %s\n",
@@ -401,6 +471,8 @@ int check_session(const SessionResult &session) noexcept {
   check(session.first.hash == session.second.hash,
         "two plays of the scene end on the same state hash");
   check(g_scriptErrors == 0, "no script raised an error");
+  check(session.focusChangesDropped >= (2 * kScriptedFocusChanges),
+        "the scripted focus changes were dropped before the engine saw them");
   check(session.presentsScene, "the window presents the scene");
   if (session.readsBackFrames) {
     for (const PlayResult *play : {&session.first, &session.second}) {
