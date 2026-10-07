@@ -45,6 +45,8 @@ refuse(const char *path, ProjectOpenFailureKind kind, const char *detail,
   ProjectOpenFailure failure{};
   failure.kind = kind;
   failure.document = document;
+  std::snprintf(failure.detail, sizeof(failure.detail), "%s",
+                (detail != nullptr) ? detail : "");
   return std::unexpected(failure);
 }
 

@@ -37,7 +37,10 @@ constexpr const char *kEmptyProjectTemplate = "templates~/empty_project";
 
 /// The hub's per-session state.
 struct HubState final {
-  char error[768] = {};
+  char error[1024] = {};
+  /// A failed open the author has not acknowledged: drawn as a modal
+  /// while a project is open, where the hub and its inline error are not.
+  bool openErrorPending = false;
   char newName[content::kProjectNameCapacity] = {};
   char newLocation[kProjectOsPathCapacity] = {};
   bool openNewProjectPopup = false;
@@ -49,9 +52,13 @@ HubState g_hub{};
 RecentList g_recentProjects{"editor_recent_projects.json", "projects",
                             kMaxRecentEntries, &recent_entry_exists};
 
+/// Records the last failure; "" forgets it, and any failed open with it.
 void set_error(const char *text) noexcept {
   std::snprintf(g_hub.error, sizeof(g_hub.error), "%s",
                 (text != nullptr) ? text : "");
+  if (g_hub.error[0] == '\0') {
+    g_hub.openErrorPending = false;
+  }
 }
 
 /// The directory a new project is suggested in: the one holding the most
@@ -265,11 +272,14 @@ bool project_hub_open(const char *path) noexcept {
   EngineConfig probe{};
   const auto opened = open_project(path, &storage, &probe);
   if (!opened.has_value()) {
-    char message[768] = {};
-    std::snprintf(message, sizeof(message), "%.500s: %s",
+    const ProjectOpenFailure &failure = opened.error();
+    char message[sizeof(g_hub.error)] = {};
+    std::snprintf(message, sizeof(message), "%.500s: %s%s%s",
                   (path != nullptr) ? path : "",
-                  project_open_failure_text(opened.error().kind));
+                  project_open_failure_text(failure.kind),
+                  (failure.detail[0] != '\0') ? ": " : "", failure.detail);
     set_error(message);
+    g_hub.openErrorPending = true;
     return false;
   }
   set_error("");
@@ -330,6 +340,42 @@ void project_hub_close_project() noexcept {
 }
 
 const char *project_hub_error() noexcept { return g_hub.error; }
+
+bool project_hub_open_error_pending() noexcept {
+  return g_hub.openErrorPending;
+}
+
+void project_hub_acknowledge_error() noexcept { set_error(""); }
+
+void draw_project_open_error_popup() noexcept {
+  constexpr const char *kPopup = "Could not open project";
+  if (g_hub.openErrorPending && !ImGui::IsPopupOpen(kPopup)) {
+    ImGui::OpenPopup(kPopup);
+  }
+  const ImGuiViewport *viewport = ImGui::GetMainViewport();
+  if (viewport != nullptr) {
+    ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x * 0.5F, 0.0F),
+                             ImGuiCond_Appearing);
+  }
+  if (!ImGui::BeginPopupModal(kPopup, nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  // Forgotten elsewhere (a later open that succeeded): nothing to show.
+  if (!g_hub.openErrorPending) {
+    ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+    return;
+  }
+  ImGui::TextUnformatted("The project was not opened; this one stays open.");
+  ImGui::Separator();
+  ImGui::TextWrapped("%s", g_hub.error);
+  if (ImGui::Button("OK")) {
+    project_hub_acknowledge_error();
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
 
 void draw_project_hub() noexcept {
   const ImGuiViewport *viewport = ImGui::GetMainViewport();

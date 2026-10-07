@@ -125,6 +125,9 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   advance_thumbnail_frame();
 
   draw_main_menu_bar();
+  // File > Open Project's refusals; the hub that shows them inline is not
+  // drawn while a project is open.
+  draw_project_open_error_popup();
   draw_toolbar();
 
   const bool showStats = core::cvar_get_bool(kShowStatsCvar, false);

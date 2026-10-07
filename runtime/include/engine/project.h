@@ -76,10 +76,18 @@ enum class ProjectOpenFailureKind : std::uint8_t {
   NewerEngine,
 };
 
+/// Room for a refusal's detail, terminator included; display-only, so a
+/// longer detail is cut short.
+inline constexpr std::size_t kProjectOpenDetailCapacity = 320U;
+
 struct ProjectOpenFailure final {
   ProjectOpenFailureKind kind = ProjectOpenFailureKind::NotFound;
   /// The document's own refusal, for DocumentRefused.
   content::ProjectReadFailure document{};
+  /// What, beyond the kind, the author needs to act on: the document's
+  /// reason, the missing path, the documents that make a directory
+  /// ambiguous, or both engine versions. "" when the kind says it all.
+  char detail[kProjectOpenDetailCapacity] = {};
 };
 
 /// Opens the project at `path`: a directory holding exactly one .project

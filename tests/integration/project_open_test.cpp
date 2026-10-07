@@ -111,14 +111,24 @@ struct Untouched final {
   }
 };
 
+/// Opens `path` and checks it is refused as `kind` with nothing changed,
+/// and, when `detailHas` is given, that the refusal's detail names it.
 void expect_refusal(const char *path, ProjectOpenFailureKind kind,
-                    const char *what) {
+                    const char *what, const char *detailHas = nullptr) {
   Untouched target{};
   const auto opened = engine::open_project(path, &target.storage,
                                            &target.config);
-  g_tests.check(!opened.has_value() && (opened.error().kind == kind) &&
-                    target.unchanged(),
-                what);
+  const bool refused = !opened.has_value() && (opened.error().kind == kind) &&
+                       target.unchanged();
+  const bool detailed =
+      (detailHas == nullptr) ||
+      (!opened.has_value() &&
+       (std::strstr(opened.error().detail, detailHas) != nullptr));
+  if (refused && !detailed) {
+    std::fprintf(stderr, "  detail '%s' does not name '%s'\n",
+                 opened.error().detail, detailHas);
+  }
+  g_tests.check(refused && detailed, what);
 }
 
 /// The document's text with its engine stamp replaced by `stamp`, or
@@ -152,7 +162,14 @@ void test_engine_stamp(const fs::path &root) {
   g_tests.check(make_project(dir, true) && restamp(file, newer),
                 "a project stamped by a newer engine");
   expect_refusal(dir.string().c_str(), ProjectOpenFailureKind::NewerEngine,
-                 "a project a newer engine saved is refused, nothing changed");
+                 "a project a newer engine saved is refused, nothing changed, "
+                 "naming the version that saved it",
+                 newer.c_str());
+  const std::string runningText = std::to_string(running.majorVersion) + "." +
+                                  std::to_string(running.minorVersion) + "." +
+                                  std::to_string(running.patchVersion);
+  expect_refusal(dir.string().c_str(), ProjectOpenFailureKind::NewerEngine,
+                 "and this engine's", ("this is " + runningText).c_str());
 
   engine::ProjectStorage storage{};
   engine::EngineConfig config{};
@@ -233,14 +250,16 @@ void test_refusals(const fs::path &root) {
                  "an empty path is refused");
   const std::string missing = (root / "does_not_exist").string();
   expect_refusal(missing.c_str(), ProjectOpenFailureKind::NotFound,
-                 "a path naming nothing is refused");
+                 "a path naming nothing is refused, saying what it is not",
+                 "not a directory or a .project document");
 
   const fs::path empty = root / "empty";
   std::error_code ec{};
   fs::create_directories(empty, ec);
   const std::string emptyText = empty.string();
   expect_refusal(emptyText.c_str(), ProjectOpenFailureKind::NotFound,
-                 "a directory with no document is refused");
+                 "a directory with no document is refused, saying so",
+                 "holds no .project document");
 
   const fs::path notProject = root / "island" / "assets" / "main.scene";
   const std::string notProjectText = notProject.string();
@@ -252,7 +271,10 @@ void test_refusals(const fs::path &root) {
   fs::copy_file(two / "Island.project", two / "Copy.project", ec);
   const std::string twoText = two.string();
   expect_refusal(twoText.c_str(), ProjectOpenFailureKind::Ambiguous,
-                 "a directory with two documents is refused");
+                 "a directory with two documents is refused, naming one",
+                 "Copy.project");
+  expect_refusal(twoText.c_str(), ProjectOpenFailureKind::Ambiguous,
+                 "and naming the other", "Island.project");
   const std::string oneOfTwo = (two / "Copy.project").string();
   Untouched named{};
   g_tests.check(engine::open_project(oneOfTwo.c_str(), &named.storage,
@@ -272,8 +294,11 @@ void test_refusals(const fs::path &root) {
           (refused.error().kind == ProjectOpenFailureKind::DocumentRefused) &&
           (refused.error().document.kind ==
            engine::content::ProjectReadFailureKind::Malformed) &&
-          broken.unchanged(),
-      "a malformed document is refused with the codec's reason");
+          broken.unchanged() && (refused.error().document.reason[0] != '\0') &&
+          (std::strcmp(refused.error().detail,
+                       refused.error().document.reason) == 0),
+      "a malformed document is refused with the codec's reason, carried as "
+      "the refusal's detail");
 
   const fs::path noContent = root / "no_content";
   g_tests.check(make_project(noContent, true), "write a project to strip");
@@ -281,7 +306,7 @@ void test_refusals(const fs::path &root) {
   const std::string noContentText = noContent.string();
   expect_refusal(noContentText.c_str(),
                  ProjectOpenFailureKind::ContentRootMissing,
-                 "a missing content root is refused");
+                 "a missing content root is refused, naming it", "assets");
 
   const fs::path noScene = root / "no_scene";
   g_tests.check(make_project(noScene, true), "write a project to strip");
@@ -289,7 +314,7 @@ void test_refusals(const fs::path &root) {
   const std::string noSceneText = noScene.string();
   expect_refusal(noSceneText.c_str(),
                  ProjectOpenFailureKind::StartupSceneMissing,
-                 "a missing startup scene is refused");
+                 "a missing startup scene is refused, naming it", "main.scene");
 
   const fs::path noScript = root / "script_gone";
   g_tests.check(make_project(noScript, true), "write a project to strip");
@@ -298,7 +323,8 @@ void test_refusals(const fs::path &root) {
   expect_refusal(noScriptText.c_str(),
                  ProjectOpenFailureKind::MainScriptMissing,
                  "a main script the document names but is missing is "
-                 "refused");
+                 "refused, naming it",
+                 "main.lua");
 }
 
 /// A project opened by path bootstraps, and its per-user data is named by
@@ -580,6 +606,37 @@ void test_bundled_sample() {
 
 } // namespace
 
+/// Every refusal kind names its own reason, so the hub never shows the
+/// catch-all for a kind it can meet.
+void test_failure_text() {
+  constexpr ProjectOpenFailureKind kKinds[] = {
+      ProjectOpenFailureKind::InvalidPath,
+      ProjectOpenFailureKind::NotFound,
+      ProjectOpenFailureKind::Ambiguous,
+      ProjectOpenFailureKind::DocumentRefused,
+      ProjectOpenFailureKind::ContentRootMissing,
+      ProjectOpenFailureKind::StartupSceneMissing,
+      ProjectOpenFailureKind::MainScriptMissing,
+      ProjectOpenFailureKind::PackageMissing,
+      ProjectOpenFailureKind::PathTooLong,
+      ProjectOpenFailureKind::NewerEngine};
+  const char *fallback =
+      engine::project_open_failure_text(static_cast<ProjectOpenFailureKind>(
+          static_cast<int>(ProjectOpenFailureKind::NewerEngine) + 1));
+  bool distinct = true;
+  for (std::size_t i = 0U; i < std::size(kKinds); ++i) {
+    const char *text = engine::project_open_failure_text(kKinds[i]);
+    distinct = distinct && (text != nullptr) && (text[0] != '\0') &&
+               (std::strcmp(text, fallback) != 0);
+    for (std::size_t j = 0U; j < i; ++j) {
+      distinct = distinct &&
+                 (std::strcmp(
+                      text, engine::project_open_failure_text(kKinds[j])) != 0);
+    }
+  }
+  g_tests.check(distinct, "every refusal kind has its own reason text");
+}
+
 int main() {
   const fs::path root = fs::temp_directory_path() / "engine_project_open_test";
   std::error_code ec{};
@@ -589,6 +646,7 @@ int main() {
 
   test_opens(root);
   test_refusals(root);
+  test_failure_text();
   test_engine_stamp(root);
   test_bundled_sample();
   engine::core::shutdown_logging();

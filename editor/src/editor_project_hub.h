@@ -37,8 +37,8 @@ void project_hub_seed_bundled_sample() noexcept;
 
 /// Opens the project at `path` (a directory or a .project document):
 /// checks it opens, puts it at the front of the recent list and asks for
-/// the switch. False, with the reason shown in the hub, when it does not
-/// open.
+/// the switch. False when it does not open, with the reason kept for the
+/// hub and for draw_project_open_error_popup.
 bool project_hub_open(const char *path) noexcept;
 
 /// Creates the project `name` in `location` from the engine's
@@ -58,8 +58,21 @@ void project_hub_poll_dialogs() noexcept;
 /// unsaved scene or material is saved or discarded.
 void project_hub_close_project() noexcept;
 
-/// The reason the last open or create failed; "" when none did.
+/// The reason the last open or create failed; "" when none did. An open's
+/// reason names the path, the kind of failure and its detail (the
+/// document's reason, the missing path, or both engine versions).
 const char *project_hub_error() noexcept;
+
+/// True from a failed open until the author acknowledges it.
+bool project_hub_open_error_pending() noexcept;
+
+/// Forgets the last failure, as the failed-open window's OK does.
+void project_hub_acknowledge_error() noexcept;
+
+/// Draws a modal naming a failed open until it is acknowledged. Called
+/// while a project is open, where the hub and its inline error are not
+/// drawn: File > Open Project there has no other place to say why.
+void draw_project_open_error_popup() noexcept;
 
 /// Draws the hub over the whole viewport.
 void draw_project_hub() noexcept;

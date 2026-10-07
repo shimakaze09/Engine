@@ -235,7 +235,12 @@ do:
 
 File > Open Project... and File > Close Project leave the open project for
 another or for the hub, asking about unsaved changes first. A project named
-on the command line that cannot be opened says why in an error box.
+on the command line that cannot be opened says why in an error box. One
+that File > Open Project or the hub cannot open leaves the current one as
+it is and says why: the path, the reason and its detail (the document's own
+complaint, the missing file, or the engine version that saved it), in the
+hub or, with a project open, in a "Could not open project" window
+(`engine_unit_editor_project_hub`, `engine_integration_project_open`).
 
 Save never writes over a scene or material whose file changed on disk after
 the editor opened or last saved it (a teammate's pull, another tool). It stops
