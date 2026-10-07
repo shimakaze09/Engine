@@ -228,7 +228,10 @@ path/to/my_game`), on its startup scene. Started with none, as from a file
 manager, it shows the project hub, as Unity Hub and Godot's project manager
 do:
 - the projects opened recently (the first start lists the sample the build
-  copies beside it, `build/samples/island`); Open or double-click one;
+  copies beside it, `build/samples/island`); Open or double-click one. One
+  no longer found (moved, deleted, or on a drive that is not connected)
+  stays listed as Missing, with Open off, until you Remove it, as Unity Hub
+  and Godot's project manager keep one (`engine_unit_editor_project_hub`);
 - **Open...** picks a `.project` file;
 - **New Project...** makes one from the empty 3D template (a camera, a light
   and an empty main script) in a folder you pick, and opens it.

@@ -49,8 +49,42 @@ struct HubState final {
 };
 
 HubState g_hub{};
+/// Kept whole: a project that is not found stays listed, marked, as Unity
+/// Hub and Godot's project manager keep one, so a project on a drive that
+/// is not connected comes back with it.
 RecentList g_recentProjects{"editor_recent_projects.json", "projects",
-                            kMaxRecentEntries, &recent_entry_exists};
+                            kMaxRecentEntries, nullptr};
+
+/// Which recent projects were not found, checked when the list's entries
+/// change rather than every frame: a path on a network drive that is gone
+/// can stall each check.
+struct MissingCache final {
+  char checked[kMaxRecentEntries][kMaxRecentPathLength] = {};
+  std::size_t count = 0U;
+  bool valid = false;
+  bool missing[kMaxRecentEntries] = {};
+};
+
+MissingCache g_missing{};
+
+void refresh_missing(std::size_t count) noexcept {
+  bool same = g_missing.valid && (g_missing.count == count);
+  for (std::size_t i = 0U; same && (i < count); ++i) {
+    same = std::strcmp(g_missing.checked[i],
+                       recent_list_at(&g_recentProjects, i)) == 0;
+  }
+  if (same) {
+    return;
+  }
+  g_missing.valid = true;
+  g_missing.count = count;
+  for (std::size_t i = 0U; i < count; ++i) {
+    const char *path = recent_list_at(&g_recentProjects, i);
+    std::snprintf(g_missing.checked[i], sizeof(g_missing.checked[i]), "%s",
+                  path);
+    g_missing.missing[i] = !recent_entry_exists(path);
+  }
+}
 
 /// Records the last failure; "" forgets it, and any failed open with it.
 void set_error(const char *text) noexcept {
@@ -122,6 +156,7 @@ void draw_recent_rows() noexcept {
   ImGui::TableSetupColumn("Location", ImGuiTableColumnFlags_WidthStretch, 2.5F);
   ImGui::TableSetupColumn("##actions", ImGuiTableColumnFlags_WidthFixed);
   ImGui::TableHeadersRow();
+  refresh_missing(count);
   // A copy of the path: Open or Remove below changes the list.
   char chosen[kMaxRecentPathLength] = {};
   bool open = false;
@@ -132,6 +167,7 @@ void draw_recent_rows() noexcept {
     if (!project_display_name(path, name, sizeof(name))) {
       std::snprintf(name, sizeof(name), "(unnamed)");
     }
+    const bool missing = g_missing.missing[i];
     ImGui::PushID(static_cast<int>(i));
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
@@ -139,17 +175,26 @@ void draw_recent_rows() noexcept {
                           ImGuiSelectableFlags_SpanAllColumns |
                               ImGuiSelectableFlags_AllowOverlap |
                               ImGuiSelectableFlags_AllowDoubleClick) &&
-        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !missing) {
       std::snprintf(chosen, sizeof(chosen), "%s", path);
       open = true;
     }
     ImGui::TableNextColumn();
-    ImGui::TextDisabled("%s", path);
+    if (missing) {
+      ImGui::TextColored(ImVec4(0.9F, 0.6F, 0.3F, 1.0F), "Missing: %s", path);
+      ImGui::SetItemTooltip("Nothing is at this path now: the project was "
+                            "moved or deleted, or is on a drive that is not "
+                            "connected. Remove drops it from this list.");
+    } else {
+      ImGui::TextDisabled("%s", path);
+    }
     ImGui::TableNextColumn();
+    ImGui::BeginDisabled(missing);
     if (ImGui::SmallButton("Open")) {
       std::snprintf(chosen, sizeof(chosen), "%s", path);
       open = true;
     }
+    ImGui::EndDisabled();
     ImGui::SameLine();
     if (ImGui::SmallButton("Remove")) {
       std::snprintf(chosen, sizeof(chosen), "%s", path);
@@ -426,6 +471,7 @@ void project_hub_reset() noexcept {
   core::platform_abandon_file_dialog(g_hub.openDialog);
   core::platform_abandon_file_dialog(g_hub.folderDialog);
   g_hub = HubState{};
+  g_missing = MissingCache{};
   recent_list_forget(&g_recentProjects);
 }
 
