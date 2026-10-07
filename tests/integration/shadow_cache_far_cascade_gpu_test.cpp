@@ -14,12 +14,13 @@
 // it, then with the cascades rendered every frame. All four must match,
 // and the two faces must match each other.
 //
-// Every failure seen came from the cascades' first render of the scene,
-// and that render fell on the frame after the fixture's first: the
-// process's second frame, and the one on which the device's swapchain
-// reset (r_vsync leaving its boot value of 1 for 0) takes effect. The
-// argument chooses the frame the first render lands on, each its own
-// ctest entry since each concerns the process's own early frames:
+// Every failure seen came from the cascades' first render of the scene on
+// the process's second frame. bgfx's uniform ring grew on that frame, and
+// a growth that reordered its chunks let the third frame write over the
+// uniforms the second was still drawing with, so the cascades cached from
+// it were wrong (the ring fix is in cmake/patch_bgfx.cmake). The argument
+// chooses the frame the first render lands on, each its own ctest entry
+// since each concerns the process's own early frames:
 //   after-boot       the frame after the fixture's first, as above
 //                    (default);
 //   after-boot-unchanged
