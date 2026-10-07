@@ -606,6 +606,41 @@ void test_bundled_sample() {
 
 } // namespace
 
+/// A project whose content root resolves past kProjectOsPathCapacity is
+/// refused as too long rather than cut short, since a cut path names
+/// another directory. The directory itself stays well inside Windows'
+/// MAX_PATH, so the case builds on every platform; only the content root,
+/// which the refusal comes before checking, runs past.
+void test_path_too_long(const fs::path &root) {
+  const std::size_t rootLength = fs::absolute(root).string().size();
+  constexpr std::size_t kDirectoryLength = 150U;
+  if (rootLength + 10U > kDirectoryLength) {
+    std::printf("SKIPPED: the temporary directory's path (%zu characters) "
+                "leaves no room below %zu\n",
+                rootLength, kDirectoryLength);
+    return;
+  }
+  const fs::path dir =
+      root / std::string(kDirectoryLength - rootLength - 1U, 'p');
+  std::error_code ec{};
+  fs::create_directories(dir, ec);
+  engine::content::ProjectDocument doc = make_document("");
+  std::snprintf(doc.contentRoot, sizeof(doc.contentRoot), "%s",
+                std::string(120U, 'c').c_str());
+  const std::string file = (dir / "Long.project").string();
+  g_tests.check(!ec &&
+                    engine::content::write_project_document(file.c_str(), doc),
+                "write a project whose content root resolves past the "
+                "capacity");
+  g_tests.check((fs::absolute(dir).string().size() + 1U + 120U) >
+                    engine::kProjectOsPathCapacity,
+                "the content root does resolve past the capacity");
+  expect_refusal(file.c_str(), ProjectOpenFailureKind::PathTooLong,
+                 "a content root past the path capacity is refused as too "
+                 "long, untouched",
+                 "shorter path");
+}
+
 /// Every refusal kind names its own reason, so the hub never shows the
 /// catch-all for a kind it can meet.
 void test_failure_text() {
@@ -647,6 +682,7 @@ int main() {
   test_opens(root);
   test_refusals(root);
   test_failure_text();
+  test_path_too_long(root);
   test_engine_stamp(root);
   test_bundled_sample();
   engine::core::shutdown_logging();
