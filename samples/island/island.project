@@ -4,7 +4,8 @@
     "name": "island",
     "organisation": "",
     "version": "0.1.0",
-    "guid": "c5cda74e-ce67-4632-a344-63e526219f0c"
+    "guid": "c5cda74e-ce67-4632-a344-63e526219f0c",
+    "engine": "0.1.0"
   },
   "roots": {
     "content": "assets",

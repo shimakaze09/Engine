@@ -139,6 +139,20 @@ open_project(const char *path, ProjectStorage *storage,
     return refuse(path, ProjectOpenFailureKind::DocumentRefused,
                   document.error().reason, document.error());
   }
+  const content::ProjectEngineVersion running =
+      content::running_engine_version();
+  if (staged->document.engine.set &&
+      (content::compare_engine_versions(staged->document.engine, running) >
+       0)) {
+    char detail[160] = {};
+    std::snprintf(detail, sizeof(detail),
+                  "it was saved by engine %u.%u.%u; this is %u.%u.%u",
+                  staged->document.engine.majorVersion,
+                  staged->document.engine.minorVersion,
+                  staged->document.engine.patchVersion, running.majorVersion,
+                  running.minorVersion, running.patchVersion);
+    return refuse(path, ProjectOpenFailureKind::NewerEngine, detail);
+  }
 
   const std::filesystem::path directory = absoluteFile.parent_path();
   const std::filesystem::path contentRoot =
@@ -257,6 +271,8 @@ const char *project_open_failure_text(ProjectOpenFailureKind kind) noexcept {
     return "a package the project depends on is missing";
   case ProjectOpenFailureKind::PathTooLong:
     return "a project path is too long";
+  case ProjectOpenFailureKind::NewerEngine:
+    return "the project was saved by a newer engine";
   }
   return "the project could not be opened";
 }

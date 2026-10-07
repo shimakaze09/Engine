@@ -29,6 +29,8 @@
 #include <new>
 #include <string>
 
+#include "engine/core/engine_version.h"
+
 #include "../test_harness.h"
 
 namespace {
@@ -36,6 +38,10 @@ namespace {
 namespace ct = engine::content;
 
 constexpr const char *kGuid = "5fe40ece-6a1b-4c2d-9e3f-0a1b2c3d4e5f";
+
+/// The stamp the running engine writes, as it appears in the document.
+constexpr const char *kEngineStamp =
+    "\"engine\": \"" ENGINE_VERSION_STRING "\"";
 
 /// The exact text the writer produces for the reference document.
 std::string reference_text() {
@@ -47,7 +53,8 @@ std::string reference_text() {
                      "    \"version\": \"0.1.0\",\n"
                      "    \"guid\": \"") +
          kGuid +
-         "\"\n"
+         "\",\n"
+         "    \"engine\": \"" ENGINE_VERSION_STRING "\"\n"
          "  },\n"
          "  \"roots\": {\n"
          "    \"content\": \"assets\",\n"
@@ -238,6 +245,15 @@ void check_refusals(engine::tests::TestContext &t) {
        "mainScript"},
       {"\"mainScript\": \"assets/main.lua\"",
        "\"mainScript\": \"assets/main.txt\"", "mainScript"},
+      {kEngineStamp, "\"engine\": \"1.2\"", "identity.engine"},
+      {kEngineStamp, "\"engine\": \"1.2.3.4\"", "identity.engine"},
+      {kEngineStamp, "\"engine\": \"1..3\"", "identity.engine"},
+      {kEngineStamp, "\"engine\": \"1.2.x\"", "identity.engine"},
+      {kEngineStamp, "\"engine\": \" 1.2.3\"", "identity.engine"},
+      {kEngineStamp, "\"engine\": \"-1.2.3\"", "identity.engine"},
+      {kEngineStamp, "\"engine\": \"4294967296.0.0\"", "identity.engine"},
+      {kEngineStamp, "\"engine\": \"\"", "identity.engine"},
+      {kEngineStamp, "\"engine\": 1", "identity.engine"},
   };
   bool all = true;
   for (const Case &c : cases) {
@@ -252,6 +268,71 @@ void check_refusals(engine::tests::TestContext &t) {
   t.check(refused_for(text.substr(0U, text.size() / 2U), ""),
           "a truncated document is refused");
   t.check(refused_for("[1,2]", ""), "a non-object document is refused");
+}
+
+/// The engine stamp (#137): read when present, absent in a document from
+/// before it, always the running engine's when written, and ordered part
+/// by part.
+void check_engine_stamp(engine::tests::TestContext &t) {
+  const ct::ProjectEngineVersion running = ct::running_engine_version();
+  t.check(running.set && (running.majorVersion == ENGINE_VERSION_MAJOR) &&
+              (running.minorVersion == ENGINE_VERSION_MINOR) &&
+              (running.patchVersion == ENGINE_VERSION_PATCH),
+          "the running version is the build's");
+
+  const std::string text = reference_text();
+  std::unique_ptr<ct::ProjectDocument> document = fresh();
+  t.check(ct::parse_project_document(text.data(), text.size(), document.get())
+                  .has_value() &&
+              document->engine.set &&
+              (ct::compare_engine_versions(document->engine, running) == 0),
+          "a stamped document reads its stamp");
+
+  const std::string unstamped =
+      replaced(text, ",\n    \"engine\": \"" ENGINE_VERSION_STRING "\"", "");
+  std::unique_ptr<ct::ProjectDocument> old = fresh();
+  t.check((unstamped != text) &&
+              ct::parse_project_document(unstamped.data(), unstamped.size(),
+                                         old.get())
+                  .has_value() &&
+              !old->engine.set,
+          "a document from before the stamp reads, unstamped");
+  char written[4096] = {};
+  std::size_t length = 0U;
+  t.check(
+      ct::format_project_document(*old, written, sizeof(written), &length) &&
+          (std::string(written, length) == text),
+      "writing it stamps the running engine");
+
+  old->engine.set = true;
+  old->engine.majorVersion = 0U;
+  old->engine.minorVersion = 0U;
+  old->engine.patchVersion = 1U;
+  t.check(
+      ct::format_project_document(*old, written, sizeof(written), &length) &&
+          (std::string(written, length) == text),
+      "an older stamp is replaced by the running engine's on write");
+
+  ct::ProjectEngineVersion a{};
+  ct::ProjectEngineVersion b{};
+  t.check(ct::parse_engine_version("0.1.0", &a) &&
+              ct::parse_engine_version("0.10.0", &b) &&
+              (ct::compare_engine_versions(a, b) < 0) &&
+              (ct::compare_engine_versions(b, a) > 0) &&
+              (ct::compare_engine_versions(a, a) == 0),
+          "versions order by number, not by text");
+  t.check(ct::parse_engine_version("1.0.0", &a) &&
+              ct::parse_engine_version("0.99.99", &b) &&
+              (ct::compare_engine_versions(a, b) > 0) &&
+              ct::parse_engine_version("2.3.4", &a) &&
+              ct::parse_engine_version("2.3.5", &b) &&
+              (ct::compare_engine_versions(a, b) < 0),
+          "major outranks minor, minor outranks patch");
+  ct::ProjectEngineVersion kept = a;
+  t.check(!ct::parse_engine_version("2.3", &kept) &&
+              !ct::parse_engine_version(nullptr, &kept) &&
+              (ct::compare_engine_versions(kept, a) == 0),
+          "a malformed version leaves the destination untouched");
 }
 
 void check_scene_bounds(engine::tests::TestContext &t) {
@@ -809,6 +890,7 @@ int main() {
   check_packages(t);
   check_collision_layers(t);
   check_refusals(t);
+  check_engine_stamp(t);
   check_scene_bounds(t);
   check_file_outcomes(t);
   return t.finish("project_document");

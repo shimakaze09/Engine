@@ -21,6 +21,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 
@@ -118,6 +119,60 @@ void expect_refusal(const char *path, ProjectOpenFailureKind kind,
   g_tests.check(!opened.has_value() && (opened.error().kind == kind) &&
                     target.unchanged(),
                 what);
+}
+
+/// The document's text with its engine stamp replaced by `stamp`, or
+/// removed when `stamp` is empty.
+bool restamp(const fs::path &file, const std::string &stamp) {
+  std::ifstream in(file, std::ios::binary);
+  std::string text((std::istreambuf_iterator<char>(in)),
+                   std::istreambuf_iterator<char>());
+  in.close();
+  const std::size_t at = text.find(",\n    \"engine\": \"");
+  const std::size_t end =
+      (at == std::string::npos) ? std::string::npos : text.find('"', at + 17U);
+  if (end == std::string::npos) {
+    return false;
+  }
+  text.replace(at, end + 1U - at,
+               stamp.empty() ? std::string()
+                             : (",\n    \"engine\": \"" + stamp + "\""));
+  return write_text(file, text.c_str());
+}
+
+/// A project another engine wrote: a newer one is refused before anything
+/// else is read, an older one and one from before the stamp open (#137).
+void test_engine_stamp(const fs::path &root) {
+  const fs::path dir = root / "stamped";
+  const fs::path file = dir / "Island.project";
+  const engine::content::ProjectEngineVersion running =
+      engine::content::running_engine_version();
+  const std::string newer = std::to_string(running.majorVersion + 1U) + ".0.0";
+
+  g_tests.check(make_project(dir, true) && restamp(file, newer),
+                "a project stamped by a newer engine");
+  expect_refusal(dir.string().c_str(), ProjectOpenFailureKind::NewerEngine,
+                 "a project a newer engine saved is refused, nothing changed");
+
+  engine::ProjectStorage storage{};
+  engine::EngineConfig config{};
+  g_tests.check(
+      restamp(file, "0.0.0") &&
+          engine::open_project(dir.string().c_str(), &storage, &config)
+              .has_value() &&
+          storage.document.engine.set &&
+          (storage.document.engine.majorVersion == 0U) &&
+          (storage.document.engine.patchVersion == 0U),
+      "a project an older engine saved opens, its stamp read");
+
+  engine::ProjectStorage unstamped{};
+  engine::EngineConfig unstampedConfig{};
+  g_tests.check(restamp(file, "") &&
+                    engine::open_project(dir.string().c_str(), &unstamped,
+                                         &unstampedConfig)
+                        .has_value() &&
+                    !unstamped.document.engine.set,
+                "a project from before the stamp opens, unstamped");
 }
 
 void test_opens(const fs::path &root) {
@@ -534,6 +589,7 @@ int main() {
 
   test_opens(root);
   test_refusals(root);
+  test_engine_stamp(root);
   test_bundled_sample();
   engine::core::shutdown_logging();
   test_bootstrap(root);

@@ -11,6 +11,7 @@
 #include <new>
 
 #include "engine/core/atomic_file.h"
+#include "engine/core/engine_version.h"
 #include "engine/core/file_read.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
@@ -457,7 +458,75 @@ struct Appender final {
   }
 };
 
+/// Reads one run of decimal digits that fits 32 bits from `*cursor`,
+/// moving it past the run. False on no digits or overflow.
+bool read_version_part(const char **cursor, std::uint32_t *out) noexcept {
+  const char *at = *cursor;
+  std::uint64_t value = 0U;
+  std::size_t digits = 0U;
+  while ((*at >= '0') && (*at <= '9')) {
+    value = (value * 10U) + static_cast<std::uint64_t>(*at - '0');
+    if (value > 0xFFFFFFFFULL) {
+      return false;
+    }
+    ++at;
+    ++digits;
+  }
+  if (digits == 0U) {
+    return false;
+  }
+  *cursor = at;
+  *out = static_cast<std::uint32_t>(value);
+  return true;
+}
+
 } // namespace
+
+ProjectEngineVersion running_engine_version() noexcept {
+  ProjectEngineVersion version{};
+  version.set = true;
+  version.majorVersion = ENGINE_VERSION_MAJOR;
+  version.minorVersion = ENGINE_VERSION_MINOR;
+  version.patchVersion = ENGINE_VERSION_PATCH;
+  return version;
+}
+
+bool parse_engine_version(const char *text,
+                          ProjectEngineVersion *out) noexcept {
+  if ((text == nullptr) || (out == nullptr)) {
+    return false;
+  }
+  ProjectEngineVersion parsed{};
+  const char *cursor = text;
+  if (!read_version_part(&cursor, &parsed.majorVersion) || (*cursor != '.')) {
+    return false;
+  }
+  ++cursor;
+  if (!read_version_part(&cursor, &parsed.minorVersion) || (*cursor != '.')) {
+    return false;
+  }
+  ++cursor;
+  if (!read_version_part(&cursor, &parsed.patchVersion) || (*cursor != '\0')) {
+    return false;
+  }
+  parsed.set = true;
+  *out = parsed;
+  return true;
+}
+
+int compare_engine_versions(const ProjectEngineVersion &a,
+                            const ProjectEngineVersion &b) noexcept {
+  const std::uint32_t left[3] = {a.majorVersion, a.minorVersion,
+                                 a.patchVersion};
+  const std::uint32_t right[3] = {b.majorVersion, b.minorVersion,
+                                  b.patchVersion};
+  for (std::size_t i = 0U; i < 3U; ++i) {
+    if (left[i] != right[i]) {
+      return (left[i] < right[i]) ? -1 : 1;
+    }
+  }
+  return 0;
+}
 
 bool collision_layers_are_default(
     const ProjectCollisionLayers &layers) noexcept {
@@ -671,7 +740,7 @@ parse_project_document(const char *text, std::size_t length,
       "schemaVersion", "identity",  "roots",        "scenes",  "startupScene",
       "mainScript",    "scripting", "dependencies", "physics", "saves"};
   constexpr const char *kIdentityKeys[] = {"name", "organisation", "version",
-                                           "guid"};
+                                           "guid", "engine"};
   constexpr const char *kRootKeys[] = {"content", "cache"};
   constexpr const char *kScriptingKeys[] = {"instructionLimit",
                                             "memoryLimitMiB"};
@@ -694,7 +763,7 @@ parse_project_document(const char *text, std::size_t length,
       !r.has_value()) {
     return r;
   }
-  if (auto r = check_members(parser, identity, kIdentityKeys, 4U, "identity");
+  if (auto r = check_members(parser, identity, kIdentityKeys, 5U, "identity");
       !r.has_value()) {
     return r;
   }
@@ -722,6 +791,20 @@ parse_project_document(const char *text, std::size_t length,
   }
   if (!parse_asset_guid(guidText, &staged->guid)) {
     return refuse("identity.guid", "is not canonical UUID text");
+  }
+  // Absent in a document written before the stamp existed; present, it
+  // must read whole.
+  core::JsonValue engineValue{};
+  if (parser.get_object_field(identity, "engine", &engineValue)) {
+    char engineText[kProjectVersionCapacity] = {};
+    if (engineValue.type != core::JsonValue::Type::String) {
+      return refuse("identity.engine", "is not a string");
+    }
+    if (!parser.copy_string_strict(engineValue, engineText,
+                                   sizeof(engineText)) ||
+        !parse_engine_version(engineText, &staged->engine)) {
+      return refuse("identity.engine", "is not MAJOR.MINOR.PATCH");
+    }
   }
 
   core::JsonValue roots{};
@@ -928,6 +1011,14 @@ bool format_project_document(const ProjectDocument &document, char *out,
   a.quoted(document.version);
   a.text(",\n    \"guid\": ");
   a.quoted(guidText);
+  // The running engine wrote it, whatever stamp the document came with.
+  const ProjectEngineVersion running = running_engine_version();
+  char engineText[48] = {};
+  std::snprintf(engineText, sizeof(engineText), "%u.%u.%u",
+                running.majorVersion, running.minorVersion,
+                running.patchVersion);
+  a.text(",\n    \"engine\": ");
+  a.quoted(engineText);
   a.text("\n  },\n  \"roots\": {\n    \"content\": ");
   a.quoted(document.contentRoot);
   a.text(",\n    \"cache\": ");

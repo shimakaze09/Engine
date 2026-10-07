@@ -848,6 +848,13 @@ Settings > Saves from 1 to 256 MiB, is saved as `"saves": {"maxSlotMiB":
 16}`, left out at the 4 MiB default; a lower limit still loads the larger
 saves written before it.
 
+Every save of the `.project` document stamps the engine version that wrote
+it, as `"engine": "0.1.0"` under `"identity"`, as Unreal's `.uproject`
+records its engine. A project a newer engine saved is refused with that
+reason before anything else is read; one an older engine saved, or one from
+before the stamp, opens (`engine_unit_project_document`,
+`engine_integration_project_open`).
+
 The scripting surface is still evolving. Some APIs are generated from annotated accessors, while the hand-written surface lives in domain binding translation units under `scripting/src/` (entity lifecycle, body, mesh/material, physics, lights, camera, audio, input, timers, coroutines, and more).
 
 ## Assets and mesh conversion
